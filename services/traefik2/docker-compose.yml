@@ -1,0 +1,27 @@
+version: '3'
+
+services:
+  reverse-proxy:
+    image: traefik:v2.10
+    command:
+      - --providers.docker
+      - --api.dashboard=true
+      - --entrypoints.web.address=:80
+      - --log.level=DEBUG
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.traefik-secure.entrypoints=web"
+      - "traefik.http.routers.traefik-secure.rule=Host(`monitoring.localhost`)"
+      - "traefik.http.routers.traefik-secure.service=api@internal"
+    networks:
+      - traefik
+
+networks:
+  traefik:
+    external: true

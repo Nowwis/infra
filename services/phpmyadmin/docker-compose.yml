@@ -1,0 +1,26 @@
+version: "3"
+
+services:
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: service_phpmyadmin
+    environment:
+      - PMA_HOSTS=service_mysql_8_0
+      - PMA_VERBOSES=Serveur SQL 8.0
+    volumes:
+      - ./configuration/config.inc.php:/etc/phpmyadmin/config.user.inc.php
+      - ./configuration/upload.ini:/usr/local/etc/php/conf.d/upload.ini
+    labels:
+      - "traefik.enable=true"      
+      - "traefik.http.routers.phpmyadmin.entrypoints=web"
+      - "traefik.http.routers.phpmyadmin.rule=Host(`phpmyadmin.localhost`)"
+      - "traefik.docker.network=traefik"
+    networks:
+      - traefik
+    restart: always
+
+
+networks:
+  traefik:
+    external : true
+

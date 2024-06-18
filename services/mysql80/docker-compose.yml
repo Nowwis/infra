@@ -1,0 +1,25 @@
+version: "3"
+
+services:
+  mysql:
+    image: mysql:8.0
+    command: mysqld --sql_mode="" --secure_file_priv="/var/lib/mysql-files"
+    container_name: service_mysql_8_0
+    volumes:
+      - ../../datas/mysql_8_0/datas:/var/lib/mysql
+      - ./configuration/conf.d:/etc/mysql/conf.d
+      - ../../datas/mysql_8_0/files:/var/lib/mysql-files
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.tcp.routers.mysql8.entrypoints=mysql_8_0"
+      - "traefik.tcp.services.mysql.loadbalancer.server.port=3306"
+    networks:
+      - traefik
+networks:
+  traefik:
+    external: true
+
+

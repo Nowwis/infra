@@ -1,0 +1,7 @@
+Installation sous WSL
+
+Créer un volume :
+docker network create traefik
+
+Puis
+cd services/traefik2/ && docker compose up -d
