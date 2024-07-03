@@ -2,3 +2,8 @@
 
 /datas/*
 !/datas/.gitkeep
+
+/services/traefik2/certs/*
+!/services/traefik2/certs/.gitkeep
+/services/traefik2/logs/*
+!/services/traefik2/logs/.gitkeep

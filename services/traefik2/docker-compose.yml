@@ -1,24 +1,20 @@
-version: '3'
-
 services:
   reverse-proxy:
-    image: traefik:v2.10
-    command:
-      - --providers.docker
-      - --api.dashboard=true
-      - --entrypoints.web.address=:80
-      - --log.level=DEBUG
+    image: traefik:v2.11
+    container_name: infra_traefik
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./logs/:/logs/
+      - ./config/traefik.yaml:/etc/traefik/traefik.yaml
+      - ./config/dynamic_conf.yaml:/etc/traefik/dynamic_conf.yaml
+      - ./certs:/etc/certs:ro
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=traefik"
-      - "traefik.http.routers.traefik-secure.entrypoints=web"
-      - "traefik.http.routers.traefik-secure.rule=Host(`monitoring.localhost`)"
-      - "traefik.http.routers.traefik-secure.service=api@internal"
+      - "traefik.http.routers.traefik=true"
+      - "traefik.http.routers.traefik.tls=true"
     networks:
       - traefik
 

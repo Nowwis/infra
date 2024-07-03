@@ -1,7 +1,14 @@
-Installation sous WSL
+Installation sous WSL / Mac
 
-Créer un volume :
+# Création des volumes
 docker network create traefik
+docker network create databases
 
-Puis
-make up
+# Création des certificats via mkcert
+mkcert -install
+Puis se placer dans le répertoire services/traefik2/
+mkcert -cert-file certs/docker.localhost.pem -key-file certs/docker.localhost-key.pem "docker.localhost" "*.docker.localhost"
+
+# Commande à connaître
+make up : permet de démarrer les container
+make down : permet d'arrêter les container

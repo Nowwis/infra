@@ -1,13 +1,11 @@
-version: "3"
-
 services:
   mailhog:
-    container_name: service_mailhog
+    container_name: infra_mailhog
     image: mailhog/mailhog
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.mailhog.entrypoints=web"
-      - "traefik.http.routers.mailhog.rule=Host(`mailer.localhost`)"
+      - "traefik.http.routers.mailhog.rule=Host(`mailer.docker.localhost`)"
+      - "traefik.http.routers.mailhog.tls=true"
       - "traefik.http.services.mailhog.loadbalancer.server.port=8025"
       - "traefik.docker.network=traefik"
     networks:
