@@ -3,7 +3,7 @@ services:
     image: phpmyadmin/phpmyadmin
     container_name: infra_phpmyadmin
     environment:
-      - PMA_HOSTS=service_mysql_8_0
+      - PMA_HOSTS=infra_mysql_8_0
       - PMA_VERBOSES=Serveur SQL 8.0
     volumes:
       - ./configuration/config.inc.php:/etc/phpmyadmin/config.user.inc.php
