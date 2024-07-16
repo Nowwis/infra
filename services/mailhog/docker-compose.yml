@@ -2,6 +2,8 @@ services:
   mailhog:
     container_name: infra_mailhog
     image: mailhog/mailhog
+    ports:
+      - 1025:1025
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.mailhog.rule=Host(`mailer.docker.localhost`)"
@@ -10,7 +12,10 @@ services:
       - "traefik.docker.network=traefik"
     networks:
       - traefik
+      - mailhog
 
 networks:
   traefik:
     external : true
+  mailhog:
+    external: true

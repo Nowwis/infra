@@ -3,6 +3,7 @@ Installation sous WSL / Mac
 # Création des volumes
 docker network create traefik
 docker network create databases
+docker network create mailhog
 
 # Création des certificats via mkcert
 mkcert -install
