@@ -5,6 +5,7 @@ services:
     environment:
       - PMA_HOSTS=infra_mysql_8_0
       - PMA_VERBOSES=Serveur SQL 8.0
+      - UPLOAD_LIMIT=300M
     volumes:
       - ./configuration/config.inc.php:/etc/phpmyadmin/config.user.inc.php
       - ./configuration/upload.ini:/usr/local/etc/php/conf.d/upload.ini
