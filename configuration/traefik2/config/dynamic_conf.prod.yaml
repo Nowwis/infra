@@ -1,5 +1,1 @@
-http:
-  routers:
-    traefik:
-      tls:
-        certResolver: le
+http: {}
