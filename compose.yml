@@ -1,0 +1,76 @@
+services:
+  reverse-proxy:
+    image: traefik:v2.11
+    container_name: infra_traefik
+    restart: always
+#    command:
+#      - --api.dashboard=true
+#      - --api.insecure=${TRAEFIK_DASHBOARD_INSECURE}
+#      - --providers.docker=true
+#      - --providers.docker.exposedbydefault=false
+#      - --entrypoints.web.address=:80
+#      - --entrypoints.websecure.address=:443
+#      - --certificatesresolvers.le.acme.httpchallenge=true
+#      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+#      - --certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}
+#      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+      - ./configuration/traefik/config/traefik.${ENV}.yaml:/etc/traefik/traefik.yaml
+      - ./configuration/traefik/config/dynamic_conf.${ENV}.yaml:/etc/traefik/dynamic_conf.yaml:ro
+      - ./configuration/traefik/logs/:/logs/
+      - ./configuration/traefik/certs:/etc/certs:ro
+    networks:
+      - traefik
+
+  mysql:
+    image: mysql:8.0
+    container_name: infra_mysql_8_0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      #MYSQL_DATABASE: ${MYSQL_DATABASE}
+    volumes:
+      - ./datas/mysql_8_0/datas:/var/lib/mysql
+      - ./configuration/mysql_8_0/conf.d:/etc/mysql/conf.d
+      - ./datas/mysql_8_0/files:/var/lib/mysql-files
+    networks:
+      - traefik
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: infra_phpmyadmin
+    restart: always
+    environment:
+      - PMA_HOSTS=infra_mysql_8_0
+      - PMA_VERBOSES=Serveur SQL 8.0
+      - UPLOAD_LIMIT=300M
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pma.rule=Host(`${PMA_DOMAIN}`)"
+      - "traefik.http.routers.pma.entrypoints=${TRAEFIK_ENTRYPOINT}"
+      - "traefik.http.routers.pma.tls.certresolver=le"
+      - "traefik.http.services.pma.loadbalancer.server.port=80"
+    networks:
+      - traefik
+
+  mailhog:
+    image: mailhog/mailhog
+    container_name: infra_mailhog
+    restart: always
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailhog.rule=Host(`${MAILHOG_DOMAIN}`)"
+      - "traefik.http.routers.mailhog.entrypoints=${TRAEFIK_ENTRYPOINT}"
+      - "traefik.http.routers.mailhog.tls.certresolver=le"
+      - "traefik.http.services.mailhog.loadbalancer.server.port=8025"
+    networks:
+      - traefik
+
+networks:
+  traefik:
+    driver: bridge

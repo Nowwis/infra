@@ -1,0 +1,15 @@
+http:
+  routers:
+    traefik:
+      rule: "Host(`monitoring.docker.localhost`)"
+      service: "api@internal"
+      tls:
+        domains:
+          - main: "docker.localhost"
+            sans:
+              - "*.docker.localhost"
+
+tls:
+  certificates:
+    - certFile: /etc/certs/docker.localhost.pem
+      keyFile: /etc/certs/docker.localhost-key.pem

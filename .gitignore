@@ -3,7 +3,12 @@
 /datas/*
 !/datas/.gitkeep
 
-/services/traefik2/certs/*
-!/services/traefik2/certs/.gitkeep
-/services/traefik2/logs/*
-!/services/traefik2/logs/.gitkeep
+/configuration/traefik2/certs/*
+!/configuration/traefik2/certs/.gitkeep
+/configuration/traefik2/logs/*
+!/configuration/traefik2/logs/.gitkeep
+
+/letsencrypt/*
+!/letsencrypt/.gitkeep
+
+.env
