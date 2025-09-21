@@ -71,6 +71,8 @@ services:
       - "traefik.http.routers.mailhog.entrypoints=${TRAEFIK_ENTRYPOINT}"
       - "traefik.http.routers.mailhog.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
       - "traefik.http.services.mailhog.loadbalancer.server.port=8025"
+      - "traefik.http.routers.mailhog.middlewares=${TRAEFIK_MAILHOG_MIDDLEWARE}"
+      - "traefik.http.middlewares.mailhog-auth.basicauth.users=${TRAEFIK_MAILHOG_USERS}"
     networks:
       - traefik
 
