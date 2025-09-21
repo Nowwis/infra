@@ -1,8 +1,6 @@
 http:
   routers:
     traefik:
-      rule: "Host(`monitoring.docker.localhost`)"
-      service: "api@internal"
       tls:
         domains:
           - main: "docker.localhost"

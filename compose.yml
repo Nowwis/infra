@@ -5,6 +5,16 @@ services:
     restart: always
     command:
       - --certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}
+      - --api.dashboard=true
+      - --api.insecure=${TRAEFIK_DASHBOARD_INSECURE}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.monitoring.rule=Host(`${MONITORING_DOMAIN}`)"
+      - "traefik.http.routers.monitoring.entrypoints=websecure"
+      - "traefik.http.routers.monitoring.tls.certresolver=le"
+      - "traefik.http.services.monitoring.loadbalancer.server.port=8080"
+      - "traefik.http.routers.monitoring.middlewares=auth"
+      - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_DASHBOARD_USERS}"
     ports:
       - "80:80"
       - "443:443"

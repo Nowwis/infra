@@ -1,9 +1,5 @@
 http:
   routers:
     traefik:
-      rule: "Host(`monitoring.${DOMAIN}`)"
-      service: "api@internal"
-      entryPoints:
-        - websecure
       tls:
         certResolver: le
