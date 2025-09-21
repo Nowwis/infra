@@ -13,7 +13,7 @@ services:
       - "traefik.http.routers.monitoring.entrypoints=websecure"
       - "traefik.http.routers.monitoring.tls.certresolver=le"
       - "traefik.http.services.monitoring.loadbalancer.server.port=8080"
-      - "traefik.http.routers.monitoring.middlewares=auth"
+      - "traefik.http.routers.monitoring.middlewares=${TRAEFIK_MONITORING_MIDDLEWARE}"
       - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_DASHBOARD_USERS}"
     ports:
       - "80:80"
