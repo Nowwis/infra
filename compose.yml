@@ -3,17 +3,8 @@ services:
     image: traefik:v2.11
     container_name: infra_traefik
     restart: always
-#    command:
-#      - --api.dashboard=true
-#      - --api.insecure=${TRAEFIK_DASHBOARD_INSECURE}
-#      - --providers.docker=true
-#      - --providers.docker.exposedbydefault=false
-#      - --entrypoints.web.address=:80
-#      - --entrypoints.websecure.address=:443
-#      - --certificatesresolvers.le.acme.httpchallenge=true
-#      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
-#      - --certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}
-#      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+    command:
+      - --certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}
     ports:
       - "80:80"
       - "443:443"
