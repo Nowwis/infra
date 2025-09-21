@@ -1,12 +1,3 @@
-http:
-  routers:
-    traefik:
-      tls:
-        domains:
-          - main: "docker.localhost"
-            sans:
-              - "*.docker.localhost"
-
 tls:
   certificates:
     - certFile: /etc/certs/docker.localhost.pem

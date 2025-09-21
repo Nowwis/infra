@@ -9,9 +9,11 @@ services:
       - --api.insecure=${TRAEFIK_DASHBOARD_INSECURE}
     labels:
       - "traefik.enable=true"
+      - "traefik.http.routers.monitoring=true"
+      - "traefik.http.routers.monitoring.tls=true"
       - "traefik.http.routers.monitoring.rule=Host(`${MONITORING_DOMAIN}`)"
-      - "traefik.http.routers.monitoring.entrypoints=websecure"
-      - "traefik.http.routers.monitoring.tls.certresolver=le"
+      - "traefik.http.routers.monitoring.entrypoints=${TRAEFIK_ENTRYPOINT}"
+      - "traefik.http.routers.monitoring.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
       - "traefik.http.services.monitoring.loadbalancer.server.port=8080"
       - "traefik.http.routers.monitoring.middlewares=${TRAEFIK_MONITORING_MIDDLEWARE}"
       - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_DASHBOARD_USERS}"
@@ -54,7 +56,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.pma.rule=Host(`${PMA_DOMAIN}`)"
       - "traefik.http.routers.pma.entrypoints=${TRAEFIK_ENTRYPOINT}"
-      - "traefik.http.routers.pma.tls.certresolver=le"
+      - "traefik.http.routers.pma.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
       - "traefik.http.services.pma.loadbalancer.server.port=80"
     networks:
       - traefik
@@ -67,7 +69,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.mailhog.rule=Host(`${MAILHOG_DOMAIN}`)"
       - "traefik.http.routers.mailhog.entrypoints=${TRAEFIK_ENTRYPOINT}"
-      - "traefik.http.routers.mailhog.tls.certresolver=le"
+      - "traefik.http.routers.mailhog.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
       - "traefik.http.services.mailhog.loadbalancer.server.port=8025"
     networks:
       - traefik
