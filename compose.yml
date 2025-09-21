@@ -20,7 +20,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./letsencrypt:/letsencrypt
-      - ./configuration/traefik2/config/traefik.${ENV}.yaml:/etc/traefik/traefik.yaml
+      - ./configuration/traefik2/config/traefik.${ENV}.yaml:/etc/traefik/traefik.yaml:ro
       - ./configuration/traefik2/config/dynamic_conf.${ENV}.yaml:/etc/traefik/dynamic_conf.yaml:ro
       - ./configuration/traefik2/logs/:/logs/
       - ./configuration/traefik2/certs:/etc/certs:ro
