@@ -14,7 +14,7 @@ services:
       - "traefik.http.routers.monitoring.rule=Host(`${MONITORING_DOMAIN}`)"
       - "traefik.http.routers.monitoring.entrypoints=${TRAEFIK_ENTRYPOINT}"
       - "traefik.http.routers.monitoring.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
-      - "traefik.http.services.monitoring.loadbalancer.server.port=8080"
+      - "traefik.http.routers.monitoring.service=api@internal"
       - "traefik.http.routers.monitoring.middlewares=${TRAEFIK_MONITORING_MIDDLEWARE}"
       - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_DASHBOARD_USERS}"
     ports:
