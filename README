@@ -7,7 +7,7 @@ docker network create mailhog
 
 # Création des certificats via mkcert
 mkcert -install
-Puis se placer dans le répertoire services/traefik2/
+Puis se placer dans le répertoire configuration/traefik2/
 mkcert -cert-file certs/docker.localhost.pem -key-file certs/docker.localhost-key.pem "docker.localhost" "*.docker.localhost"
 
 # Commande à connaître
