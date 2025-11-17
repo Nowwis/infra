@@ -64,28 +64,31 @@ services:
       - traefik
       - databases
 
-  mailhog:
-    image: mailhog/mailhog
-    container_name: infra_mailhog
+  mailer:
+    image: axllent/mailpit
+    container_name: infra_mailer
     restart: always
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.mailhog.rule=Host(`${MAILHOG_DOMAIN}`)"
-      - "traefik.http.routers.mailhog.tls=true"
-      - "traefik.http.routers.mailhog.entrypoints=${TRAEFIK_ENTRYPOINT}"
-      - "traefik.http.routers.mailhog.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
-      - "traefik.http.services.mailhog.loadbalancer.server.port=8025"
-      - "traefik.http.routers.mailhog.middlewares=${TRAEFIK_MAILHOG_MIDDLEWARE}"
-      - "traefik.http.middlewares.mailhog-auth.basicauth.users=${TRAEFIK_MAILHOG_USERS}"
+      - "traefik.http.routers.mailpit.rule=Host(`${MAILPIT_DOMAIN}`)"
+      - "traefik.http.routers.mailpit.tls=true"
+      - "traefik.http.routers.mailpit.entrypoints=${TRAEFIK_ENTRYPOINT}"
+      - "traefik.http.routers.mailpit.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
+      - "traefik.http.services.mailpit.loadbalancer.server.port=8025"
+      - "traefik.http.routers.mailpit.middlewares=${TRAEFIK_MAILPIT_MIDDLEWARE}"
+      - "traefik.http.middlewares.mailpit-auth.basicauth.users=${TRAEFIK_MAILPIT_USERS}"
       - "traefik.docker.network=traefik"
     networks:
       - traefik
-      - mailhog
+      - mailer
 
 networks:
   traefik:
     external: true
   databases:
     external: true
-  mailhog:
+  mailer:
     external: true
