@@ -3,6 +3,8 @@ services:
     image: traefik:v2.11
     container_name: infra_traefik
     restart: always
+    environment:
+      - DOCKER_API_VERSION=1.51
     command:
       - --certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}
       - --api.dashboard=true
@@ -17,8 +19,8 @@ services:
       - "traefik.http.routers.monitoring.middlewares=${TRAEFIK_MONITORING_MIDDLEWARE}"
       - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_DASHBOARD_USERS}"
     ports:
-      - "80:80"
-      - "443:443"
+      - "${TRAEFIK_BIND}80:80"
+      - "${TRAEFIK_BIND}443:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./letsencrypt:/letsencrypt
@@ -51,7 +53,7 @@ services:
     environment:
       - PMA_HOST=infra_mysql_8_0
       - PMA_VERBOSE=Serveur SQL 8.0
-      - UPLOAD_LIMIT=300M
+      - UPLOAD_LIMIT=999M
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.phpmyadmin.rule=Host(`${PMA_DOMAIN}`)"

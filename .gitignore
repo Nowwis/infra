@@ -12,3 +12,5 @@
 !/letsencrypt/.gitkeep
 
 .env
+# backups locaux (env/compose)
+*.bak
