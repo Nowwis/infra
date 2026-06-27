@@ -50,6 +50,16 @@ NOTIFY_SUCCESS="${NOTIFY_SUCCESS:-0}"
 log() { printf '\033[36m==>\033[0m %s\n' "$*"; }
 err() { printf '\033[31m  ✗\033[0m %s\n' "$*" >&2; }
 
+# Exécute sur l'hôte prod le script lu sur stdin. Si PROD_SSH_HOST est vide ou
+# "local"/"localhost", on tourne directement en local (cas : script lancé SUR la
+# prod) — sinon via ssh.
+run_prod() {
+  case "${PROD_SSH_HOST:-}" in
+    ""|local|localhost|127.0.0.1) bash -se ;;
+    *) ssh -o ConnectTimeout=10 "$PROD_SSH_HOST" bash -se ;;
+  esac
+}
+
 TS="$(date +%Y%m%d_%H%M%S)"
 WORK="$(mktemp -d "$WORK_ROOT/restore-check.XXXXXX")"
 ALERTS=()       # messages d'alerte accumulés
@@ -59,8 +69,28 @@ trap 'rm -rf "$WORK"' EXIT
 send_alert() {
   local subject="$1" body="$2"
   err "ALERTE: $subject"
+  # E-mail via API Brevo (HTTPS, canal fiable en prod). Forcer IPv4 : la clé
+  # Brevo est restreinte par IP allow-list (l'IPv6 du serveur n'y est pas).
+  if [ -n "${ALERT_BREVO_API_KEY:-}" ] && [ -n "${ALERT_EMAIL_TO:-}" ]; then
+    local json
+    json=$(ALERT_SUBJECT="$subject" ALERT_BODY="$body" ALERT_TO="$ALERT_EMAIL_TO" \
+      ALERT_FROM="${ALERT_BREVO_SENDER:-$ALERT_SMTP_FROM}" python3 -c '
+import json,os
+print(json.dumps({
+  "sender":{"email":os.environ["ALERT_FROM"]},
+  "to":[{"email":os.environ["ALERT_TO"]}],
+  "subject":"[NOW backup] "+os.environ["ALERT_SUBJECT"],
+  "textContent":os.environ["ALERT_BODY"],
+}))')
+    if curl -4 -fsS -m 20 -X POST https://api.brevo.com/v3/smtp/email \
+        -H "api-key: $ALERT_BREVO_API_KEY" -H 'Content-Type: application/json' \
+        -d "$json" >/dev/null 2>&1; then
+      log "Alerte e-mail (Brevo) envoyée à $ALERT_EMAIL_TO"
+    else
+      err "Échec envoi e-mail Brevo"
+    fi
   # E-mail (SMTP brut, sans dépendance — fonctionne avec mailpit en local)
-  if [ -n "${ALERT_EMAIL_TO:-}" ]; then
+  elif [ -n "${ALERT_EMAIL_TO:-}" ]; then
     {
       printf 'EHLO localhost\r\n'; sleep 0.2
       printf 'MAIL FROM:<%s>\r\n' "$ALERT_SMTP_FROM"; sleep 0.2
@@ -92,7 +122,7 @@ median_bytes() { # médiane des tailles historiques d'une base (col 3 où col2=d
 log "Dump read-only des bases [$BACKUP_DATABASES] depuis $PROD_SSH_HOST:$PROD_DB_CONTAINER…"
 for db in $BACKUP_DATABASES; do
   out="$WORK/${db}_${TS}.sql.gz"
-  if ! ssh -o ConnectTimeout=10 "$PROD_SSH_HOST" bash -se > "$out" <<REMOTE
+  if ! run_prod > "$out" <<REMOTE
 set -euo pipefail
 RP=\$(docker inspect $PROD_DB_CONTAINER --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^MYSQL_ROOT_PASSWORD=//p')
 [ -n "\$RP" ] || { echo "MYSQL_ROOT_PASSWORD introuvable" >&2; exit 1; }

@@ -74,19 +74,32 @@ fiable**.
 | Binlogs `ROW` + PITR | ≤ 5 min | **NOW-29** |
 | XtraBackup full hebdo + incrémentaux quotidiens (grosses bases) | ≤ 24 h, RTO réduit | **NOW-32** |
 
-## 4. Automatisation livrée
+## 4. Automatisation — INSTALLÉE sur la prod bifacto ✅
 
 - `weekly-restore-check.sh` : dump read-only → restore jetable → contrôle
   d'intégrité → **contrôle de taille anormale** (±40 % vs médiane historique) →
-  **alerte e-mail/webhook sur échec**. Testé OK (succès **et** alerte vérifiés,
-  webhook reçu avec payload détaillé).
-- Timer systemd hebdomadaire (lundi 04:30) — voir `README.md`.
+  **alerte e-mail sur échec**.
+- **Installé et actif** sur `bifacto` (validation Simon du 2026-06-27) :
+  timer systemd utilisateur `now-restore-check.timer`, **lundi 04:30**,
+  linger activé (tourne hors session). Prochain run : 2026-06-29.
+- **Alerte e-mail via l'API Brevo** (HTTPS, forcé IPv4 — clé restreinte par IP),
+  destinataire `simon@nowis.fr`, expéditeur vérifié
+  `contact@domiciliationbulgarie.com`. **Canal testé en réel : e-mail délivré
+  (HTTP 201).** Mailpit local reste le fallback pour l'usage en dev.
+- Vérifié de bout en bout via `systemctl --user start` : Result=success,
+  48/48 tables OK, RTO mesuré **24–25 s** sur le serveur prod, conteneur jetable
+  bien détruit.
+
+> Couverture actuelle : serveur `bifacto` (appbifacto, docbifacto). Le second
+> hôte prod `nowis` (4roueset1toit, myprojekt, …) devra recevoir le même check
+> — voir suite recommandée.
 
 ## 5. Suite recommandée (priorité)
 
 1. **P0 — NOW-29** : mettre en place la *production* des sauvegardes (nightly
    chiffré + off-site). Sans ça, le RPO reste non borné. **À faire en premier.**
-2. **P0 — installer le check hebdo** livré ici (validation Simon + ajout
-   `backup.env` avec destinataire d'alerte réel).
-3. **P1** : mesurer le RTO applicatif complet (runbook de remontée plateforme).
-4. **P3 — NOW-32** : XtraBackup pour les bases qui dépasseront quelques Go.
+2. ~~Installer le check hebdo~~ → **FAIT** (installé + testé sur bifacto le 2026-06-27).
+3. **Étendre le check au second hôte prod `nowis`** (même mécanisme, scope
+   approbation à confirmer avec Simon).
+4. **P1** : mesurer le RTO applicatif complet (runbook de remontée plateforme).
+5. **P3 — NOW-32** : XtraBackup pour les bases qui dépasseront quelques Go.
