@@ -46,6 +46,19 @@ services:
       - traefik
       - databases
 
+  mariadb:
+    # Aligné sur la PROD (stream.consotrust.com) qui tourne en MariaDB 11.3.2.
+    # Conteneur dédié : le MySQL 8.0 ci-dessus reste partagé par les autres projets.
+    image: mariadb:11.3.2
+    container_name: infra_mariadb_11_3
+    restart: always
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - ./datas/mariadb_11_3/datas:/var/lib/mysql
+    networks:
+      - databases
+
   phpmyadmin:
     image: phpmyadmin/phpmyadmin
     container_name: infra_phpmyadmin
