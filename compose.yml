@@ -64,8 +64,8 @@ services:
     container_name: infra_phpmyadmin
     restart: always
     environment:
-      - PMA_HOST=infra_mysql_8_0
-      - PMA_VERBOSE=Serveur SQL 8.0
+      - PMA_HOSTS=infra_mysql_8_0,infra_mariadb_11_3
+      - PMA_VERBOSES=MySQL 8.0,MariaDB 11.3.2
       - UPLOAD_LIMIT=999M
     labels:
       - "traefik.enable=true"
