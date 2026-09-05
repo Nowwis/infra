@@ -63,10 +63,20 @@ cmd_destroy() {
     die "worktree has uncommitted changes: $path (use --force to destroy anyway)"
   fi
 
+  # SAFETY: refuse a worktree with unpushed commits unless --force.
+  local unpushed=0
+  if [ -d "$path" ]; then
+    unpushed="$(wt_git_unpushed "$path")"
+    [ -n "$unpushed" ] || unpushed=0
+    if [ "$unpushed" -gt 0 ] && [ "$force" != 1 ]; then
+      die "worktree has $unpushed unpushed commit(s); use --force"
+    fi
+  fi
+
   log "plan: destroy '$project'"
   log "plan: docker compose -p $project -f $compose down -v"
   log "plan: DROP DATABASE IF EXISTS \`$db\`"
-  log "plan: remove worktree $path"
+  log "plan: remove worktree $path (unpushed=$unpushed)"
   if [ "$prune" = 1 ] && [ -n "$branch" ]; then
     log "plan: delete branch $branch"
   fi
@@ -86,7 +96,7 @@ cmd_destroy() {
   fi
 
   if [ "$prune" = 1 ] && [ -n "$repo" ] && [ -n "$branch" ]; then
-    wt_run git -C "$repo" branch -D "$branch"
+    wt_run git -C "$repo" branch -d "$branch"
   fi
 
   # Ruling D: guarded — no direct registry mutation while WT_DRY_RUN=1.
