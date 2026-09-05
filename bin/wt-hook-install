@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Idempotent installer/uninstaller for the wt SessionStart hook + skill link.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOOK="$HERE/wt-session-hook"
+SETTINGS="${WT_SETTINGS:-$HOME/.claude/settings.json}"
+SKILLS_DIR="${WT_SKILLS_DIR:-$HOME/.claude/skills}"
+SKILL_SRC="$HERE/../skills/worktree-env"
+mkdir -p "$(dirname "$SETTINGS")" "$SKILLS_DIR"
+[ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+
+remove_entry() { jq --arg h "$HOOK" '
+  (.hooks.SessionStart) |= ( (. // [])
+    | map( .hooks |= map(select(.command != $h)) )
+    | map(select((.hooks|length) > 0)) )
+  | if (.hooks.SessionStart|length)==0 then del(.hooks.SessionStart) else . end
+  | if (.hooks|length)==0 then del(.hooks) else . end
+' "$SETTINGS"; }
+
+if [ "${1:-}" = "--uninstall" ]; then
+  tmp="$(mktemp)"; remove_entry > "$tmp" && mv "$tmp" "$SETTINGS"
+  [ -L "$SKILLS_DIR/worktree-env" ] && rm -f "$SKILLS_DIR/worktree-env" || true
+  echo "wt hook uninstalled"
+  exit 0
+fi
+
+# add (idempotent: strip any existing entry for this hook, then append exactly one)
+tmp="$(mktemp)"
+remove_entry | jq --arg h "$HOOK" '
+  .hooks = (.hooks // {})
+  | .hooks.SessionStart = ((.hooks.SessionStart // []) + [{matcher:"*",hooks:[{type:"command",command:$h,timeout:10}]}])
+' > "$tmp" && mv "$tmp" "$SETTINGS"
+# link skill source (dangling link is fine; skill file lands in a later task)
+[ -e "$SKILLS_DIR/worktree-env" ] || [ -L "$SKILLS_DIR/worktree-env" ] || ln -s "$SKILL_SRC" "$SKILLS_DIR/worktree-env"
+echo "wt hook installed → $SETTINGS"
