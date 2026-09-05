@@ -3,7 +3,7 @@
 # (php -S ... dashboard/server/router.php) + a Traefik file-provider route.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; ROOT="$(dirname "$HERE")"
-PORT="${WT_DASH_PORT:-8899}"; BIND="${WT_DASH_BIND:-0.0.0.0}"
+PORT="${WT_DASH_PORT:-8899}"; BIND="${WT_DASH_BIND:-${WT_DASH_HOSTADDR:-100.75.44.109}}"
 UNIT_DIR="${WT_DASH_UNIT_DIR:-$HOME/.config/systemd/user}"; UNIT="$UNIT_DIR/wt-dashboard.service"
 TRAEFIK="${WT_DASH_TRAEFIK:-$ROOT/configuration/traefik2/config/dynamic_conf.local.yaml}"
 BEGIN="# >>> wt-dashboard >>>"; END="# <<< wt-dashboard <<<"

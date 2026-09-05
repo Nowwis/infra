@@ -63,12 +63,19 @@ Environment variables the installer honors (all optional, with sane defaults):
 | Variable             | Default                                                        | Meaning |
 |----------------------|-----------------------------------------------------------------|---------|
 | `WT_DASH_PORT`        | `8899`                                                          | Port the backend listens on. |
-| `WT_DASH_BIND`        | `0.0.0.0`                                                       | Bind address for `php -S`. |
+| `WT_DASH_BIND`        | `100.75.44.109` (same as `WT_DASH_HOSTADDR`, the host's Tailscale IP) | Bind address for `php -S`. |
 | `WT_DASH_UNIT_DIR`    | `$HOME/.config/systemd/user`                                    | Where the systemd unit is written. |
 | `WT_DASH_TRAEFIK`     | `configuration/traefik2/config/dynamic_conf.local.yaml`         | Traefik dynamic config file to patch. |
 | `WT_DASH_HOSTADDR`    | `100.75.44.109` (Tailscale IP of the host)                      | Address Traefik uses to reach the backend — **must be reachable from the Traefik container**, see below. |
 | `WT_DASH_BASICAUTH`   | `admin:$apr1$placeholder` (a **placeholder**, will not authenticate) | htpasswd-format `user:hash` entry for the Traefik basicauth middleware. **Generate a real one before going live** — see below. |
 | `WT_DASH_RELOAD`      | unset                                                           | Set to `true` to skip the `systemctl --user daemon-reload` / `enable --now` calls (used by the test suite; leave unset for a real install). |
+
+**Security note:** never set `WT_DASH_BIND=0.0.0.0` (or any other public-facing
+address) on a host with a public IP and no host firewall — the backend API is
+unauthenticated (basicauth is enforced only by the Traefik route at
+`worktree.docker.test`, not by `php -S` itself), so binding it publicly would
+expose `POST /api/worktrees/{project}/destroy` and the info-leaking
+`GET /api/metrics` directly on `<public-ip>:8899` to anyone on the internet.
 
 Backend-only variables (read by the PHP side, not the installer):
 
@@ -120,6 +127,11 @@ systemctl --user status wt-dashboard      # confirm it's running
 
 Then open `https://worktree.docker.test` — reachable only over Tailscale, and gated
 by the basicauth credential from step 1.
+
+Note: the systemd unit has no explicit ordering against `tailscaled` — if the
+service starts before the Tailscale IP is up, `php -S` fails to bind and the unit
+self-heals via `Restart=on-failure` (retrying until the address exists), so no boot
+ordering fix has been made.
 
 **4. Uninstall when done experimenting:**
 

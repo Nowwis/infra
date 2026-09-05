@@ -48,6 +48,22 @@ function wt_api_metrics(): string
     return $out;
 }
 
+/**
+ * Neutralize CSV formula injection: if the cell's first character could be
+ * interpreted as a formula trigger by a spreadsheet application (=, +, -, @,
+ * tab, or CR), prefix it with a single quote so it is opened as inert text.
+ */
+function wt_api_csv_safe_cell(string $value): string
+{
+    if ($value === '') {
+        return $value;
+    }
+
+    return in_array($value[0], ['=', '+', '-', '@', "\t", "\r"], true)
+        ? "'" . $value
+        : $value;
+}
+
 /** Flatten the aggregated metrics into a CSV string (header row + data rows). */
 function wt_api_csv(): string
 {
@@ -101,8 +117,11 @@ function wt_api_csv(): string
     }
 
     $buf = fopen('php://temp', 'r+');
-    foreach ($rows as $row) {
-        fputcsv($buf, $row);
+    foreach ($rows as $i => $row) {
+        // Header row (index 0) is a fixed, trusted literal; every data row's
+        // cells may carry attacker-influenced content (project/container
+        // names, mount points, …), so neutralize formula-injection triggers.
+        fputcsv($buf, $i === 0 ? $row : array_map('wt_api_csv_safe_cell', $row));
     }
     rewind($buf);
     $csv = stream_get_contents($buf);
