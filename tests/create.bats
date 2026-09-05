@@ -2,9 +2,10 @@ load helpers
 setup() {
   setup_wt
   export WT_APPS_FILE="$WT_ROOT/tests/fixtures/apps.conf"
-  # db.sh needs a root-password source; provide a throwaway one (read-only)
-  printf 'MYSQL_ROOT_PASSWORD=rootpw\n' > "$BATS_TEST_TMPDIR/.env"
-  export WT_ENV_FILE="$BATS_TEST_TMPDIR/.env"
+  # NOTE: deliberately NO WT_ENV_FILE — Ruling E means dry-run must not need
+  # the MYSQL_ROOT_PASSWORD source. WT_ENV_FILE from the outer env would defeat
+  # that check, so clear it.
+  unset WT_ENV_FILE
 }
 
 # line number of the first output line matching a pattern (empty if none)
@@ -20,6 +21,8 @@ _lineno() { printf '%s\n' "$output" | grep -n -- "$1" | head -1 | cut -d: -f1; }
   [[ "$output" == *"compose -p myprojekt-app-gel-123"* ]]
   [[ "$output" == *"myprojekt-app-gel-123.docker.test"* ]]
   [[ "$output" == *"make install"* ]]
+  # runtime-file provisioning is planned (.mcp.json / .env.test.local scoped to worktree)
+  [[ "$output" == *".mcp.json"* ]]
 
   # ordering: worktree add < CREATE DATABASE < compose up
   local wa cd cu

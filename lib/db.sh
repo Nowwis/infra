@@ -7,7 +7,10 @@ _wt_db_rootpw() {
   awk -F= '/^MYSQL_ROOT_PASSWORD=/{print $2; exit}' "$f"
 }
 _wt_db_sql() { # runs a SQL string as root
-  local sql="$1" pw; pw="$(_wt_db_rootpw)"
+  local sql="$1" pw
+  # Ruling E: in dry-run wt_run never executes, so the real root password is
+  # not needed — use a placeholder and do NOT read/require the env file.
+  if [ "$WT_DRY_RUN" = "1" ]; then pw='***'; else pw="$(_wt_db_rootpw)"; fi
   wt_run docker exec "$WT_DB_CONTAINER" mysql -uroot -p"$pw" -e "$sql"
 }
 wt_db_create() { # db pass

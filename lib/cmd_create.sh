@@ -87,12 +87,20 @@ cmd_create() {
   wt_git_add_worktree "$repo" "$base" "$branch" "$path"
   did_worktree=1
 
-  # --- runtime files: .docker/.env + .env.local (Ruling D: guarded, no fs writes in dry-run) ---
+  # --- runtime files (Ruling D: guarded, no fs writes in dry-run) ---
+  # Untracked runtime files (.env.local, .env.test.local, .mcp.json) are NOT
+  # brought in by `git worktree add`, so copy them from the repo into the
+  # worktree before generating/patching the env files.
   if [ "$WT_DRY_RUN" != "1" ]; then
     mkdir -p "$path/.docker"
+    local f
+    for f in .env.local .env.test.local .mcp.json; do
+      [ -f "$repo/$f" ] && cp "$repo/$f" "$path/$f"
+    done
     wt_gen_docker_env "$repo/.docker/.env" "$path/.docker/.env" "$project" "$domain"
     wt_patch_env_local "$repo/.env.local" "$path/.env.local" "$domain" "$db" "$pass"
   else
+    log "plan: copy runtime files (.env.local, .env.test.local, .mcp.json)"
     log "plan: write $path/.docker/.env  (project=$project domain=$domain)"
     log "plan: patch $path/.env.local     (db=$db, generated password)"
   fi
