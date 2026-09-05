@@ -3,7 +3,7 @@ set -euo pipefail
 WT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export WT_ROOT
 : "${WT_STATE:=$HOME/.local/state/wt}"; export WT_STATE
-export WT_DRY_RUN=0
+: "${WT_DRY_RUN:=0}"; export WT_DRY_RUN
 source "$WT_ROOT/lib/ui.sh"
 
 usage() {
