@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# SessionStart hook: detect WIP in a managed wt repo and SUGGEST a worktree.
+# Read-only, fail-safe: ALWAYS exit 0, never exit 2.
+set +e
+emit() { printf '%s' "$1"; exit 0; }   # $1 = JSON (or empty)
+{
+  HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  source "$HERE/../lib/hook.sh" 2>/dev/null || emit ""
+  CONF="${WT_HOOK_APPS:-$HERE/../etc/wt/apps.conf}"
+  WT_BIN="${WT_HOOK_WT:-$HERE/wt}"
+
+  IN="$(cat 2>/dev/null)"
+  CWD="$(printf '%s' "$IN" | jq -r '.cwd // empty' 2>/dev/null)"
+  [ -n "$CWD" ] || emit ""
+
+  INFO="$(wt_hook_app_for_cwd "$CWD" "$CONF")" || emit ""
+  APP="$(printf '%s' "$INFO" | cut -f1)"
+  REPO="$(printf '%s' "$INFO" | cut -f2)"
+  BASE="$(printf '%s' "$INFO" | cut -f3)"
+
+  BRANCH=""; NCH=0
+  if wt_hook_is_wip "$REPO" "$BASE"; then
+    BRANCH="$(git -C "$REPO" branch --show-current 2>/dev/null)"
+    NCH="$(git -C "$REPO" status --porcelain 2>/dev/null | grep -c . )"
+  fi
+
+  ENVS="$("$WT_BIN" list --json 2>/dev/null | jq -r --arg a "$APP" \
+    '[.[] | select(.app==$a) | "\(.project) → https://\(.domain)"] | join(" · ")' 2>/dev/null || echo "")"
+
+  CTX="$(wt_hook_build_context "$APP" "$BRANCH" "$NCH" "$ENVS")"
+  [ -n "$CTX" ] || emit ""
+  OUT="$(jq -n --arg c "$CTX" '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:$c}}' 2>/dev/null)"
+  emit "$OUT"
+} 2>/dev/null
+emit ""
