@@ -5,8 +5,8 @@ log()  { printf '• %s\n' "$*"; }
 warn() { printf '! %s\n' "$*" >&2; }
 ok()   { printf '✓ %s\n' "$*"; }
 
-# run: execute a command, or print it as a plan line when WT_DRY_RUN=1
-run() {
+# wt_run: execute a command, or print it as a plan line when WT_DRY_RUN=1
+wt_run() {
   if [ "$WT_DRY_RUN" = "1" ]; then
     printf '+ %s\n' "$*"
     return 0

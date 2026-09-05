@@ -1,16 +1,5 @@
 load helpers
-setup() {
-  setup_wt
-  source "$WT_ROOT/lib/profile.sh"
-  wt_profile_load "$WT_ROOT/tests/fixtures/apps.conf"
-  # Workaround: Define a compatible run() that works with bats
-  run() {
-    local _status=0 _output
-    _output=$("$@" 2>&1) || _status=$?
-    status=$_status
-    output=$_output
-  }
-}
+setup() { setup_wt; source "$WT_ROOT/lib/profile.sh"; wt_profile_load "$WT_ROOT/tests/fixtures/apps.conf"; }
 
 @test "get returns a field" {
   [ "$(wt_profile_get myprojekt-app type)" = "symfony" ]
