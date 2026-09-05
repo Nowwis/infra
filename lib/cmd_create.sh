@@ -78,13 +78,14 @@ cmd_create() {
   }
   trap '_wt_create_rollback' ERR
 
-  local pass; pass="$(openssl rand -hex 12)"
+  local pass
+  if [ "$WT_DRY_RUN" = "1" ]; then pass='***'; else pass="$(openssl rand -hex 12)"; fi
 
   log "create '$project'  branch=$branch base=$base"
 
   # --- git: fetch + worktree ---
   wt_run git -C "$repo" fetch origin
-  wt_git_add_worktree "$repo" "$base" "$branch" "$path"
+  wt_git_add_worktree "$repo" "origin/$base" "$branch" "$path"
   did_worktree=1
 
   # --- runtime files (Ruling D: guarded, no fs writes in dry-run) ---
