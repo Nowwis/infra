@@ -32,4 +32,3 @@ emit() { printf '%s' "$1"; exit 0; }   # $1 = JSON (or empty)
   OUT="$(jq -n --arg c "$CTX" '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:$c}}' 2>/dev/null)"
   emit "$OUT"
 } 2>/dev/null
-emit ""

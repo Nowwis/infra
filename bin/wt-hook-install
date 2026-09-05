@@ -6,8 +6,10 @@ HOOK="$HERE/wt-session-hook"
 SETTINGS="${WT_SETTINGS:-$HOME/.claude/settings.json}"
 SKILLS_DIR="${WT_SKILLS_DIR:-$HOME/.claude/skills}"
 SKILL_SRC="$HERE/../skills/worktree-env"
+die() { printf 'wt-hook-install: %s\n' "$1" >&2; exit 1; }
 mkdir -p "$(dirname "$SETTINGS")" "$SKILLS_DIR"
 [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+jq -e . "$SETTINGS" >/dev/null 2>&1 || die "settings.json is not valid JSON: $SETTINGS"
 
 remove_entry() { jq --arg h "$HOOK" '
   (.hooks.SessionStart) |= ( (. // [])

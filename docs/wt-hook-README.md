@@ -17,6 +17,8 @@ wt · myapp : travail en cours (branche feature/GEL-123, 5 fichier(s) modifié(s
 Pour isoler un nouveau ticket : demande « nouveau worktree <TICKET> » (→ wt create).
 ```
 
+The hook also surfaces active worktree environments (the "Envs actifs" line) even when the repo is clean and on its base branch — so seeing that line with no WIP suggestion above it is expected, not a bug.
+
 ## Installation
 
 To register the hook in your Claude settings:

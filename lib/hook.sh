@@ -22,6 +22,9 @@ wt_hook_is_wip() { # repo base -> 0 if wip
 wt_hook_build_context() { # app branch nchanges envs_tsv -> suggestion text, empty if nothing to say
   local app="$1" branch="$2" n="$3" envs="$4" out=""
   [ -n "$branch" ] && out="wt · ${app} : travail en cours (branche ${branch}, ${n} fichier(s) modifié(s)). Pour isoler un nouveau ticket : demande « nouveau worktree <TICKET> » (→ wt create)."
-  [ -n "$envs" ] && out+=$'\n'"Envs actifs : ${envs}"
+  if [ -n "$envs" ]; then
+    [ -n "$out" ] && out+=$'\n'
+    out+="Envs actifs : ${envs}"
+  fi
   printf '%s' "$out"
 }
