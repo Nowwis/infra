@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Idempotent installer/uninstaller: systemd --user unit for the wt dashboard
+# (php -S ... dashboard/server/router.php) + a Traefik file-provider route.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; ROOT="$(dirname "$HERE")"
+PORT="${WT_DASH_PORT:-8899}"; BIND="${WT_DASH_BIND:-0.0.0.0}"
+UNIT_DIR="${WT_DASH_UNIT_DIR:-$HOME/.config/systemd/user}"; UNIT="$UNIT_DIR/wt-dashboard.service"
+TRAEFIK="${WT_DASH_TRAEFIK:-$ROOT/configuration/traefik2/config/dynamic_conf.local.yaml}"
+BEGIN="# >>> wt-dashboard >>>"; END="# <<< wt-dashboard <<<"
+strip_block(){ awk -v b="$BEGIN" -v e="$END" 'BEGIN{k=1} $0==b{k=0} k{print} $0==e{k=1}' "$1"; }
+
+if [ "${1:-}" = "--uninstall" ]; then
+  rm -f "$UNIT"
+  if [ -f "$TRAEFIK" ]; then
+    tmp=$(mktemp); strip_block "$TRAEFIK" > "$tmp" && mv "$tmp" "$TRAEFIK"
+  fi
+  if [ "${WT_DASH_RELOAD:-}" != "true" ]; then
+    command -v systemctl >/dev/null 2>&1 && systemctl --user daemon-reload 2>/dev/null || true
+  fi
+  echo "wt-dashboard uninstalled"
+  exit 0
+fi
+
+mkdir -p "$UNIT_DIR"
+cat > "$UNIT" <<EOF
+[Unit]
+Description=wt dashboard
+
+[Service]
+ExecStart=/usr/bin/php -S ${BIND}:${PORT} -t ${ROOT}/dashboard/public ${ROOT}/dashboard/server/router.php
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Traefik file-provider block (marker-delimited, idempotent: strip then append
+# exactly one). basicauth users via WT_DASH_BASICAUTH (htpasswd line) if set.
+mkdir -p "$(dirname "$TRAEFIK")"
+[ -f "$TRAEFIK" ] || : > "$TRAEFIK"
+tmp=$(mktemp); strip_block "$TRAEFIK" > "$tmp"
+HOSTADDR="${WT_DASH_HOSTADDR:-100.75.44.109}"   # Tailscale IP of the host (Traefik reaches the host service here)
+cat >> "$tmp" <<EOF
+$BEGIN
+http:
+  routers:
+    wt-dashboard:
+      rule: "Host(\`worktree.docker.test\`)"
+      entrypoints: [websecure]
+      service: wt-dashboard
+      middlewares: [wt-dashboard-auth]
+      tls: {}
+  services:
+    wt-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://${HOSTADDR}:${PORT}"
+  middlewares:
+    wt-dashboard-auth:
+      basicAuth:
+        users: ["${WT_DASH_BASICAUTH:-admin:\$apr1\$placeholder}"]
+$END
+EOF
+mv "$tmp" "$TRAEFIK"
+
+if [ "${WT_DASH_RELOAD:-}" != "true" ]; then
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user daemon-reload
+    systemctl --user enable --now wt-dashboard.service 2>/dev/null || true
+  fi
+fi
+echo "wt-dashboard installed (port ${PORT}); confirm Traefik host address ${HOSTADDR} is reachable from the traefik container"
