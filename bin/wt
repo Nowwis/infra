@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+WT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export WT_ROOT
+: "${WT_STATE:=$HOME/.local/state/wt}"; export WT_STATE
+export WT_DRY_RUN=0
+source "$WT_ROOT/lib/ui.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: wt <command> [args]
+  create <app> <slug> [--feature|--hotfix] [--ticket KEY] [--dry-run] [--keep-on-error]
+  destroy <app> <slug> [--yes] [--force] [--prune-branch] [--dry-run]
+  list [--json]
+  open <app> <slug>
+  doctor [--fix]
+EOF
+}
+
+[ $# -ge 1 ] || { usage; exit 2; }
+cmd="$1"; shift
+# global flag
+args=(); for a in "$@"; do case "$a" in --dry-run) WT_DRY_RUN=1;; *) args+=("$a");; esac; done
+set -- "${args[@]+"${args[@]}"}"
+
+case "$cmd" in
+  create|destroy|list|open|doctor)
+    source "$WT_ROOT/lib/cmd_$cmd.sh"; "cmd_$cmd" "$@" ;;
+  -h|--help) usage ;;
+  *) die "unknown command: $cmd" ;;
+esac
