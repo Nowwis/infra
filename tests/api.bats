@@ -76,13 +76,15 @@ setup() {
 }
 
 @test "router does not require destroy.php for a plain metrics GET" {
-  # destroy.php does not exist yet (Task 4) -- metrics requests must not touch it.
-  [ ! -f "$WT_ROOT/dashboard/server/destroy.php" ]
+  # destroy.php's require lives inside the POST /destroy branch only, so a
+  # plain metrics GET must never touch it (even now that Task 4 exists).
   run php -r '
     $_SERVER["REQUEST_URI"]="/api/metrics"; $_SERVER["REQUEST_METHOD"]="GET";
     require getenv("WT_ROOT")."/dashboard/server/router.php";
+    var_dump(function_exists("wt_api_destroy"));
   '
   [ "$status" -eq 0 ]
+  [[ "$output" == *"bool(false)"* ]]
 }
 
 @test "router serves an existing static file from dashboard/public by returning false" {
