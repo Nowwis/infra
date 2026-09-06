@@ -47,17 +47,32 @@ m_sessions() {
         kind="claude"
         if ($0 ~ /remote-control/) kind="remote-control"
         else if ($0 ~ /versions\/.*--print/) kind="sdk-backend"
-        model=""
-        for (i=5;i<=NF;i++) if ($i=="--model" && i<NF) { model=$(i+1); break }
-        printf "%s\t%s\t%s\t%s\t%s\t%s\n",$1,$2,$3,$4,kind,model
+        model=""; name=""
+        for (i=5;i<=NF;i++) {
+          if ($i=="--model" && i<NF) model=$(i+1)
+          if ($i=="--name"  && i<NF) name=$(i+1)
+        }
+        printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\n",$1,$2,$3,$4,kind,model,name
       }' \
-   | jq -R -s 'split("\n")|map(select(length>0)|split("\t")|
-        {pid:((try (.[0]|tonumber) catch null)),
-         rss_kb:((try (.[1]|tonumber) catch null)),
-         cpu_pct:((try (.[2]|tonumber) catch null)),
-         etime_s:((try (.[3]|tonumber) catch null)),
-         kind:.[4],
-         model:(if (.[5]//"")=="" then null else .[5] end)})' 2>/dev/null || echo '[]'
+   | while IFS=$'\037' read -r pid rss cpu et kind model name; do
+        cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+        grp="$name"
+        [ -z "$grp" ] && [ -n "$cwd" ] && grp="$(basename "$cwd")"
+        [ -z "$grp" ] && grp="autres"
+        jq -n --arg pid "$pid" --arg rss "$rss" --arg cpu "$cpu" --arg et "$et" \
+              --arg kind "$kind" --arg model "$model" --arg name "$name" \
+              --arg cwd "$cwd" --arg grp "$grp" \
+          '{pid:(try ($pid|tonumber) catch null),
+            rss_kb:(try ($rss|tonumber) catch null),
+            cpu_pct:(try ($cpu|tonumber) catch null),
+            etime_s:(try ($et|tonumber) catch null),
+            kind:$kind,
+            model:(if $model=="" then null else $model end),
+            name:(if $name=="" then null else $name end),
+            cwd:(if $cwd=="" then null else $cwd end),
+            group:$grp}' 2>/dev/null
+      done \
+   | jq -s '.' 2>/dev/null || echo '[]'
 }
 m_all() {
   jq -n --argjson system "$(m_system)" --argjson disk "$(m_disk)" \

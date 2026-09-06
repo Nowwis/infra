@@ -28,7 +28,9 @@ EOF
   run "$M" worktrees
   echo "$output" | jq -e '.[0].project=="myapp-t1" and (.[0]|has("disk_bytes"))' >/dev/null
 }
-@test "sessions section returns an array (may be empty in test env)" {
+@test "sessions section returns an array with group/cwd/name keys" {
   run "$M" sessions
   echo "$output" | jq -e 'type=="array"' >/dev/null
+  # chaque session porte les clés de lotissement (vrai vide si aucun process)
+  echo "$output" | jq -e 'all(.[]; has("group") and has("cwd") and has("name"))' >/dev/null
 }

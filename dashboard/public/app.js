@@ -1,313 +1,253 @@
+/* Console dev — rendu du dashboard. Données via /api/metrics (poll).
+   Rendu strictement par textContent/DOM (jamais innerHTML avec des données). */
 (function () {
   'use strict';
-
   var POLL_MS = 3000;
-  var HISTORY_LEN = 40;
+  var q = '';                       // terme de recherche courant
+  var collapsed = Object.create(null); // état de repli mémorisé par clé de groupe
 
-  /** In-memory ring buffers for the tiny sparklines (never persisted, never sent anywhere). */
-  var history = {
-    mem: [],
-    swap: [],
-    load: []
-  };
-
-  function pushHistory(key, value) {
-    var buf = history[key];
-    buf.push(typeof value === 'number' && isFinite(value) ? value : 0);
-    if (buf.length > HISTORY_LEN) buf.shift();
+  // --- helpers ------------------------------------------------------------
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = String(text);
+    return n;
   }
-
-  function clearChildren(el) {
-    while (el.firstChild) el.removeChild(el.firstChild);
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+  function num(v) { var f = parseFloat(v); return isFinite(f) ? f : 0; }
+  function gib(kb) { return (num(kb) / 1048576).toFixed(1) + ' Go'; }
+  function bytes(b) {
+    b = num(b);
+    if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' Go';
+    if (b >= 1048576) return (b / 1048576).toFixed(0) + ' Mo';
+    if (b >= 1024) return (b / 1024).toFixed(0) + ' Ko';
+    return b + ' o';
   }
-
-  function el(tag, opts) {
-    var node = document.createElement(tag);
-    opts = opts || {};
-    if (opts.className) node.className = opts.className;
-    if (opts.text !== undefined) node.textContent = opts.text;
-    return node;
+  function pct(v) { return (typeof v === 'string') ? v : (num(v).toFixed(1) + ' %'); }
+  function etime(s) {
+    s = num(s); var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+    if (d) return d + 'j ' + h + 'h'; if (h) return h + 'h ' + m + 'm'; return m + 'm';
   }
+  function level(ratio, warn, crit) { return ratio >= crit ? 'lvl-crit' : ratio >= warn ? 'lvl-warn' : 'lvl-ok'; }
+  function panel(id) { return document.getElementById(id); }
+  function setCount(id, n) { var c = panel(id).querySelector('[data-count]'); if (c) c.textContent = n; }
+  function setEmpty(id, on) { var e = panel(id).querySelector('[data-empty]'); if (e) e.hidden = !on; }
 
-  function fmtBytesKb(kb) {
-    if (typeof kb !== 'number' || !isFinite(kb)) return '—';
-    var bytes = kb * 1024;
-    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    var i = 0;
-    while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
-    return bytes.toFixed(bytes >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
+  // --- vitals -------------------------------------------------------------
+  function setVital(k, ratio, value, lvl) {
+    var v = document.querySelector('.vital[data-k="' + k + '"]');
+    if (!v) return;
+    v.className = 'vital ' + (lvl || level(ratio, 0.75, 0.9));
+    v.querySelector('.meter > span').style.width = Math.max(0, Math.min(100, ratio * 100)) + '%';
+    v.querySelector('.vital-v').textContent = value;
   }
-
-  function fmtBytes(bytes) {
-    if (typeof bytes !== 'number' || !isFinite(bytes)) return '—';
-    return fmtBytesKb(bytes / 1024);
-  }
-
-  function fmtPct(v, digits) {
-    if (typeof v !== 'number' || !isFinite(v)) return '—';
-    return v.toFixed(digits === undefined ? 1 : digits) + '%';
-  }
-
-  function fmtEtime(seconds) {
-    if (typeof seconds !== 'number' || !isFinite(seconds)) return '—';
-    var s = Math.max(0, Math.floor(seconds));
-    var h = Math.floor(s / 3600);
-    var m = Math.floor((s % 3600) / 60);
-    var sec = s % 60;
-    var parts = [];
-    if (h) parts.push(h + 'h');
-    if (h || m) parts.push(m + 'm');
-    parts.push(sec + 's');
-    return parts.join(' ');
-  }
-
-  function gaugeClassForPct(pct) {
-    if (pct >= 90) return 'crit';
-    if (pct >= 70) return 'warn';
-    return '';
-  }
-
-  function buildSparkline(values, width, height) {
-    var canvas = document.createElement('canvas');
-    canvas.className = 'sparkline';
-    canvas.width = width;
-    canvas.height = height;
-    var ctx = canvas.getContext('2d');
-    if (!ctx || values.length < 2) return canvas;
-
-    var max = Math.max.apply(null, values.concat([1]));
-    var min = Math.min.apply(null, values.concat([0]));
-    var range = max - min || 1;
-
-    ctx.strokeStyle = getComputedStyle(document.documentElement)
-      .getPropertyValue('--accent').trim() || '#2563eb';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    values.forEach(function (v, i) {
-      var x = (i / (values.length - 1)) * width;
-      var y = height - ((v - min) / range) * height;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-    return canvas;
-  }
-
-  function buildGauge(label, pct, detail, sparkValues) {
-    var wrap = el('div', { className: 'gauge' });
-
-    var labelRow = el('div', { className: 'gauge-label' });
-    labelRow.appendChild(el('span', { text: label }));
-    labelRow.appendChild(el('span', { text: detail }));
-    wrap.appendChild(labelRow);
-
-    var track = el('div', { className: 'gauge-track' });
-    var fill = el('div', { className: 'gauge-fill ' + gaugeClassForPct(pct) });
-    var clamped = Math.max(0, Math.min(100, isFinite(pct) ? pct : 0));
-    fill.style.width = clamped + '%';
-    track.appendChild(fill);
-    wrap.appendChild(track);
-
-    if (sparkValues && sparkValues.length > 1) {
-      wrap.appendChild(buildSparkline(sparkValues, 160, 24));
+  function renderVitals(sys, disks) {
+    sys = sys || {};
+    var mt = num(sys.mem_total_kb), ma = num(sys.mem_avail_kb), mu = mt - ma;
+    setVital('ram', mt ? mu / mt : 0, gib(mu) + ' / ' + gib(mt), level(mt ? mu / mt : 0, 0.8, 0.92));
+    var st = num(sys.swap_total_kb), su = num(sys.swap_used_kb);
+    setVital('swap', st ? su / st : 0, st ? (gib(su) + ' / ' + gib(st)) : '—', level(st ? su / st : 0, 0.6, 0.85));
+    var nc = num(sys.ncpu) || 1, ld = num(sys.load1);
+    setVital('cpu', ld / nc, 'charge ' + ld.toFixed(2) + ' / ' + nc, level(ld / nc, 0.7, 1.0));
+    var root = (disks || []).filter(function (d) { return d.mount === '/'; })[0] || (disks || [])[0];
+    if (root) {
+      var up = num(root.use_pct) / 100;
+      setVital('disk', up, bytes(num(root.used) * 1024) + ' / ' + bytes(num(root.size) * 1024), level(up, 0.8, 0.92));
     }
-
-    return wrap;
   }
 
-  function renderSystem(system) {
-    var container = document.getElementById('system-gauges');
-    clearChildren(container);
-    system = system || {};
-
-    var memTotal = system.mem_total_kb;
-    var memAvail = system.mem_avail_kb;
-    var memUsedPct = (typeof memTotal === 'number' && memTotal > 0 && typeof memAvail === 'number')
-      ? ((memTotal - memAvail) / memTotal) * 100
-      : NaN;
-    pushHistory('mem', memUsedPct);
-    container.appendChild(buildGauge(
-      'RAM',
-      memUsedPct,
-      fmtBytesKb(memTotal - memAvail) + ' / ' + fmtBytesKb(memTotal),
-      history.mem
-    ));
-
-    var swapTotal = system.swap_total_kb;
-    var swapUsed = system.swap_used_kb;
-    var swapPct = (typeof swapTotal === 'number' && swapTotal > 0 && typeof swapUsed === 'number')
-      ? (swapUsed / swapTotal) * 100
-      : 0;
-    pushHistory('swap', swapPct);
-    container.appendChild(buildGauge(
-      'Swap',
-      swapPct,
-      fmtBytesKb(swapUsed) + ' / ' + fmtBytesKb(swapTotal),
-      history.swap
-    ));
-
-    var load1 = system.load1;
-    var ncpu = system.ncpu;
-    var loadPct = (typeof load1 === 'number' && typeof ncpu === 'number' && ncpu > 0)
-      ? (load1 / ncpu) * 100
-      : NaN;
-    pushHistory('load', loadPct);
-    container.appendChild(buildGauge(
-      'CPU (load1)',
-      loadPct,
-      (typeof load1 === 'number' ? load1.toFixed(2) : '—') + ' / ' + (ncpu || '—') + ' cœurs',
-      history.load
-    ));
+  // --- groupes repliables (docker, sessions) ------------------------------
+  function groupBlock(key, name, meta) {
+    var d = el('details', 'group'); d.dataset.key = key;
+    d.open = !collapsed[key];
+    d.addEventListener('toggle', function () { collapsed[key] = !d.open; });
+    var s = el('summary');
+    s.appendChild(el('span', 'g-name', name));
+    if (meta) s.appendChild(el('span', 'g-meta', meta));
+    d.appendChild(s);
+    var body = el('div', 'g-body'); d.appendChild(body);
+    d._body = body; d._search = (name || '').toLowerCase();
+    return d;
   }
-
-  function setRow(tbody, cells) {
-    var tr = document.createElement('tr');
-    cells.forEach(function (c) {
-      var td = document.createElement('td');
-      if (c instanceof Node) td.appendChild(c);
-      else td.textContent = c === undefined || c === null ? '—' : String(c);
-      tr.appendChild(td);
+  function groupBy(list, keyFn) {
+    var m = Object.create(null), order = [];
+    (list || []).forEach(function (x) {
+      var k = keyFn(x) || '—';
+      if (!m[k]) { m[k] = []; order.push(k); }
+      m[k].push(x);
     });
-    tbody.appendChild(tr);
+    order.sort(function (a, b) { return m[b].length - m[a].length || a.localeCompare(b); });
+    return order.map(function (k) { return { key: k, items: m[k] }; });
+  }
+  function metricsCell(pairs) {
+    var box = el('div', 'metrics');
+    pairs.forEach(function (p) {
+      var span = el('span'); span.appendChild(el('b', null, p[0])); span.appendChild(document.createTextNode(' ' + p[1]));
+      box.appendChild(span);
+    });
+    return box;
   }
 
-  function emptyRow(tbody, colspan, text) {
-    var tr = document.createElement('tr');
-    tr.className = 'empty-row';
-    var td = document.createElement('td');
-    td.colSpan = colspan;
-    td.textContent = text;
-    tr.appendChild(td);
-    tbody.appendChild(tr);
+  function renderGroups(id, groups, rowFn) {
+    var host = panel(id).querySelector('[data-groups]');
+    clear(host);
+    groups.forEach(function (g) {
+      var block = groupBlock(id + ':' + g.key, g.key, g.meta);
+      g.items.forEach(function (it) {
+        var r = rowFn(it);
+        r._search = (block._search + ' ' + (r.dataset.search || '')).trim();
+        block._body.appendChild(r);
+      });
+      host.appendChild(block);
+    });
   }
 
+  // --- docker : groupé par projet -----------------------------------------
   function renderDocker(list) {
-    var tbody = document.querySelector('#docker-table tbody');
-    clearChildren(tbody);
-    list = Array.isArray(list) ? list : [];
-    if (list.length === 0) { emptyRow(tbody, 5, 'Aucun container'); return; }
-    list.forEach(function (c) {
-      setRow(tbody, [
-        c.name,
-        c.project,
-        typeof c.cpu_pct === 'string' ? c.cpu_pct : fmtPct(c.cpu_pct),
-        c.mem_used,
-        typeof c.mem_pct === 'string' ? c.mem_pct : fmtPct(c.mem_pct)
-      ]);
+    setCount('docker', (list || []).length);
+    setEmpty('docker', !(list || []).length);
+    var groups = groupBy(list, function (c) { return c.project || c.name; }).map(function (g) {
+      var cpu = g.items.reduce(function (a, c) { return a + num(c.cpu_pct); }, 0);
+      g.meta = g.items.length + ' · ' + cpu.toFixed(1) + ' % CPU';
+      return g;
+    });
+    renderGroups('docker', groups, function (c) {
+      var r = el('div', 'row');
+      var name = el('div', 'r-name'); name.appendChild(document.createTextNode(c.name || '—'));
+      r.appendChild(name);
+      r.appendChild(metricsCell([['cpu', pct(c.cpu_pct)], ['mem', (c.mem_used || '—')]]));
+      r.dataset.search = ((c.name || '') + ' ' + (c.project || '')).toLowerCase();
+      return r;
     });
   }
 
+  // --- sessions Claude : loties par dossier -------------------------------
   function renderSessions(list) {
-    var tbody = document.querySelector('#sessions-table tbody');
-    clearChildren(tbody);
-    list = Array.isArray(list) ? list : [];
-    if (list.length === 0) { emptyRow(tbody, 6, 'Aucune session'); return; }
-    list.forEach(function (s) {
-      setRow(tbody, [
-        s.pid,
-        s.kind,
-        s.model || '—',
-        fmtBytesKb(s.rss_kb),
-        fmtPct(s.cpu_pct),
-        fmtEtime(s.etime_s)
-      ]);
+    setCount('sessions', (list || []).length);
+    setEmpty('sessions', !(list || []).length);
+    var groups = groupBy(list, function (s) { return s.group || s.name || '—'; }).map(function (g) {
+      var rss = g.items.reduce(function (a, s) { return a + num(s.rss_kb); }, 0);
+      g.meta = g.items.length + ' · ' + gib(rss);
+      return g;
+    });
+    renderGroups('sessions', groups, function (s) {
+      var r = el('div', 'row');
+      var left = el('div', 'r-name');
+      var kind = (s.kind === 'remote-control') ? 'rc' : (s.kind === 'sdk-backend') ? 'sdk' : '';
+      var tag = el('span', 'tag' + (kind ? ' ' + kind : ''), s.kind || 'claude');
+      left.appendChild(tag);
+      left.appendChild(document.createTextNode(' pid ' + (s.pid != null ? s.pid : '—')));
+      if (s.model) { var sub = el('span', 'r-sub'); sub.textContent = '  ' + s.model; left.appendChild(sub); }
+      r.appendChild(left);
+      r.appendChild(metricsCell([['rss', bytes(num(s.rss_kb) * 1024)], ['cpu', pct(s.cpu_pct)], ['âge', etime(s.etime_s)]]));
+      r.dataset.search = ((s.group || '') + ' ' + (s.kind || '') + ' ' + (s.model || '') + ' ' + (s.cwd || '') + ' ' + (s.pid || '')).toLowerCase();
+      return r;
     });
   }
 
-  function renderDisk(list) {
-    var tbody = document.querySelector('#disk-table tbody');
-    clearChildren(tbody);
-    list = Array.isArray(list) ? list : [];
-    if (list.length === 0) { emptyRow(tbody, 5, 'Aucune donnée disque'); return; }
-    list.forEach(function (d) {
-      setRow(tbody, [
-        d.mount,
-        fmtBytesKb(d.size),
-        fmtBytesKb(d.used),
-        fmtBytesKb(d.avail),
-        d.use_pct
-      ]);
-    });
-  }
-
-  function destroyWorktree(project) {
-    var ok = window.confirm(
-      'Supprimer définitivement le worktree "' + project + '" ? Cette action est irréversible.'
-    );
-    if (!ok) return;
-
-    fetch('/api/worktrees/' + encodeURIComponent(project) + '/destroy', { method: 'POST' })
-      .catch(function () { /* network error: refresh() below will still show current state */ })
-      .then(function () { refresh(); });
-  }
-
+  // --- worktrees ----------------------------------------------------------
   function renderWorktrees(list) {
-    var tbody = document.querySelector('#worktrees-table tbody');
-    clearChildren(tbody);
-    list = Array.isArray(list) ? list : [];
-    if (list.length === 0) { emptyRow(tbody, 5, 'Aucun worktree'); return; }
-
-    list.forEach(function (w) {
-      var project = w.project;
-      var domain = w.domain;
-
-      var actions = el('div', { className: 'actions-cell' });
-
-      if (domain) {
-        var openLink = el('a', { className: 'btn', text: 'Ouvrir' });
-        openLink.href = 'https://' + domain;
-        openLink.target = '_blank';
-        openLink.rel = 'noopener noreferrer';
-        actions.appendChild(openLink);
-      }
-
-      var destroyBtn = el('button', { className: 'btn danger', text: 'Supprimer' });
-      destroyBtn.type = 'button';
-      destroyBtn.addEventListener('click', function () { destroyWorktree(project); });
-      actions.appendChild(destroyBtn);
-
-      setRow(tbody, [
-        project,
-        w.branch,
-        domain,
-        fmtBytes(w.disk_bytes),
-        actions
-      ]);
+    setCount('worktrees', (list || []).length);
+    setEmpty('worktrees', !(list || []).length);
+    var host = panel('worktrees').querySelector('[data-rows]');
+    clear(host);
+    (list || []).forEach(function (w) {
+      var box = el('div', 'wt');
+      box.dataset.search = ((w.project || '') + ' ' + (w.branch || '') + ' ' + (w.domain || '')).toLowerCase();
+      var top = el('div', 'wt-top');
+      top.appendChild(el('span', 'wt-name', w.project || '—'));
+      if (w.domain) top.appendChild(el('span', 'wt-dom', w.domain));
+      var act = el('div', 'wt-actions');
+      if (w.domain) { var a = el('a', 'btn', 'Ouvrir'); a.href = 'https://' + w.domain; a.target = '_blank'; a.rel = 'noopener'; act.appendChild(a); }
+      var del = el('button', 'btn danger', 'Supprimer');
+      del.addEventListener('click', function () { destroy(w.project); });
+      act.appendChild(del);
+      top.appendChild(act);
+      box.appendChild(top);
+      var sub = el('div', 'wt-sub');
+      if (w.branch) sub.appendChild(el('span', null, w.branch));
+      sub.appendChild(el('span', null, 'disque ' + bytes(w.disk_bytes)));
+      box.appendChild(sub);
+      host.appendChild(box);
     });
   }
 
-  function setLastUpdate() {
-    var stamp = document.getElementById('last-update');
-    if (!stamp) return;
-    var now = new Date();
-    stamp.textContent = 'MAJ ' + now.toLocaleTimeString();
+  // --- disque -------------------------------------------------------------
+  function renderDisk(list) {
+    setCount('disk', (list || []).length);
+    var host = panel('disk').querySelector('[data-rows]');
+    clear(host);
+    (list || []).forEach(function (d) {
+      var row = el('div', 'disk-row');
+      row.dataset.search = (d.mount || '').toLowerCase();
+      var top = el('div', 'disk-top');
+      top.appendChild(el('span', 'path', d.mount || '—'));
+      top.appendChild(el('span', 'figs', bytes(num(d.used) * 1024) + ' / ' + bytes(num(d.size) * 1024) + '  ·  ' + (d.use_pct || '')));
+      row.appendChild(top);
+      var up = num(d.use_pct) / 100;
+      var m = el('div', 'meter ' + level(up, 0.8, 0.92)); var span = el('span'); span.style.width = Math.min(100, up * 100) + '%'; m.appendChild(span);
+      row.appendChild(m);
+      host.appendChild(row);
+    });
   }
 
-  function setExportLink() {
-    var link = document.getElementById('export-csv');
-    if (link) link.href = '/api/metrics.csv';
+  // --- recherche ----------------------------------------------------------
+  function applyFilter() {
+    var t = q.trim().toLowerCase();
+    // groupes (docker, sessions)
+    ['docker', 'sessions'].forEach(function (id) {
+      panel(id).querySelectorAll('.group').forEach(function (g) {
+        var gname = g.dataset.key.split(':').slice(1).join(':').toLowerCase();
+        var gmatch = !t || gname.indexOf(t) >= 0;
+        var vis = 0;
+        g.querySelectorAll('.row').forEach(function (r) {
+          var show = !t || gmatch || (r._search || '').indexOf(t) >= 0;
+          r.classList.toggle('hidden', !show); if (show) vis++;
+        });
+        g.classList.toggle('hidden', vis === 0 && !gmatch);
+        if (t && vis > 0) g.open = true;
+      });
+    });
+    // lignes simples (worktrees, disk)
+    ['worktrees', 'disk'].forEach(function (id) {
+      panel(id).querySelectorAll('[data-search]').forEach(function (r) {
+        r.classList.toggle('hidden', !!t && (r.dataset.search || '').indexOf(t) < 0);
+      });
+    });
   }
 
-  async function refresh() {
-    try {
-      var res = await fetch('/api/metrics', { cache: 'no-store' });
-      if (!res.ok) throw new Error('bad status ' + res.status);
-      var data = await res.json();
-
-      renderSystem(data.system);
-      renderDocker(data.docker);
-      renderWorktrees(data.worktrees);
-      renderSessions(data.sessions);
-      renderDisk(data.disk);
-      setLastUpdate();
-    } catch (err) {
-      var stamp = document.getElementById('last-update');
-      if (stamp) stamp.textContent = 'Erreur de chargement';
-    }
+  // --- actions ------------------------------------------------------------
+  function destroy(project) {
+    if (!project) return;
+    if (!window.confirm('Supprimer le worktree-env « ' + project + ' » ?\n(docker down + drop DB + suppression du worktree)')) return;
+    fetch('/api/worktrees/' + encodeURIComponent(project) + '/destroy', { method: 'POST' })
+      .then(function (r) { if (!r.ok) alert('Échec de la suppression (' + r.status + ').'); })
+      .catch(function () { alert('Échec réseau lors de la suppression.'); })
+      .then(refresh);
   }
 
-  document.addEventListener('DOMContentLoaded', function () {
-    setExportLink();
-    refresh();
-    setInterval(refresh, POLL_MS);
-  });
+  // --- cycle --------------------------------------------------------------
+  function setStatus(state, text) {
+    var s = document.getElementById('status');
+    s.className = 'status ' + state;
+    document.getElementById('status-text').textContent = text;
+  }
+  function refresh() {
+    return fetch('/api/metrics', { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (data) {
+        renderVitals(data.system, data.disk);
+        renderDocker(data.docker);
+        renderSessions(data.sessions);
+        renderWorktrees(data.worktrees);
+        renderDisk(data.disk);
+        applyFilter();
+        setStatus('live', 'actualisé à l’instant');
+      })
+      .catch(function () { setStatus('error', 'hors ligne — nouvelle tentative…'); });
+  }
+
+  document.getElementById('q').addEventListener('input', function (e) { q = e.target.value; applyFilter(); });
+  refresh();
+  setInterval(refresh, POLL_MS);
 })();

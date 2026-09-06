@@ -5,11 +5,12 @@ setup() { setup_wt; P="$WT_ROOT/dashboard/public"; }
   grep -q 'app.js' "$P/index.html"; grep -q 'style.css' "$P/index.html"
   for id in system docker worktrees sessions disk; do grep -q "id=\"$id\"" "$P/index.html"; done
 }
-@test "app.js polls /api/metrics and wires destroy + export" {
+@test "app.js polls /api/metrics and wires destroy; index exposes CSV export + search" {
   grep -q '/api/metrics' "$P/app.js"
   grep -q '/destroy' "$P/app.js"
-  grep -q 'metrics.csv' "$P/app.js"
   grep -qi 'setInterval\|setTimeout' "$P/app.js"
+  grep -q 'metrics.csv' "$P/index.html"
+  grep -q 'id="q"' "$P/index.html"
 }
 @test "no external CDN dependency" {
   ! grep -qiE 'https?://[^"]+\.(js|css)' "$P/index.html"
