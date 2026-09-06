@@ -1,5 +1,8 @@
-# État local — ne pas versionner
+# État local / secrets — ne pas versionner
 backup.env
+backup.env.*
+!backup.env.example
+!backup.env.*.example
 .restore-history.csv
 restore-test-result.json
 *.sql

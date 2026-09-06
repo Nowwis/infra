@@ -1,0 +1,32 @@
+# Unité systemd TEMPLATÉE (--user) pour le contrôle hebdo de restauration.
+# L'instance (%i) désigne l'hôte prod à contrôler : now-restore-check@nowis,
+# now-restore-check@bifacto, … Chaque instance charge sa propre config
+# backup/backup.env.<hôte> (PROD_SSH_HOST, bases, alerting).
+#
+# Installation (mode utilisateur, recommandé sur ce serveur sans cron) :
+#   mkdir -p ~/.config/systemd/user
+#   cp now-restore-check@.{service,timer} ~/.config/systemd/user/
+#   loginctl enable-linger webadmin            # pour tourner hors session
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now now-restore-check@nowis.timer
+#   systemctl --user enable --now now-restore-check@bifacto.timer
+#   systemctl --user list-timers               # vérifier les prochains runs
+#
+# %h = home de l'utilisateur (/home/webadmin) ; adapter si le dépôt Infra
+# n'est pas en %h/Project/Infra.
+[Unit]
+Description=NOW — Contrôle hebdomadaire de restauration des sauvegardes %i (NOW-25)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Project/Infra/backup
+# Chaque hôte a son fichier de config dédié (gitignoré).
+EnvironmentFile=%h/Project/Infra/backup/backup.env.%i
+ExecStart=%h/Project/Infra/backup/weekly-restore-check.sh
+# Timeout généreux (dump + restore + checks) ; ajuster si les bases grossissent.
+TimeoutStartSec=1800
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
