@@ -150,3 +150,38 @@ and the other tool's routers/services/middlewares silently vanish from Traefik's
 view. If you introduce another generator that touches this file, either merge its
 routers under the same single `http:` key, or point it at a separate dynamic-config
 file instead.
+
+## Modèle de config (depuis la refonte deploy)
+
+La **route Traefik est committée** dans `configuration/traefik2/config/dynamic_conf.local.yaml`
+(routeur + service + middleware `basicAuth.usersFile`). `bin/wt-dash-install` **ne
+touche plus ce fichier** : il ne gère que (1) l'unit `systemd --user` et (2) le
+**secret** basic-auth `configuration/traefik2/certs/wt-dashboard.htpasswd` — un fichier
+gitignored, déjà bind-monté dans Traefik à `/etc/certs`. L'arbre de travail reste donc
+propre après déploiement, et aucun `docker restart infra_traefik` n'est requis pour un
+(ré)install (le secret est relu par Traefik ; seul un changement de la route committée
+nécessite un restart Traefik).
+
+## Déploiement & mise à jour
+
+Sur le **checkout principal** (`/home/webadmin/Project/Infra`, sur `main`) :
+
+```
+make dash-deploy      # git pull --ff-only + (re)génère unit/secret + restart du service
+```
+
+- **Changement de code seul** (UI / collecteur / API) : le service `php -S` sert les
+  fichiers en direct → un simple `git pull` suffit, **sans redémarrage**.
+- **Changement d'infra** (unit, port, secret) : `make dash-deploy` le régénère.
+- **Changement de la route committée** (`dynamic_conf.local.yaml`) : ajouter
+  `docker restart infra_traefik` une fois (Traefik re-bind le fichier).
+
+### Première mise en service (hôte neuf)
+
+```
+cp dashboard/dashboard.env.example dashboard/dashboard.env   # puis renseigner WT_DASH_PASSWORD
+make dash-deploy
+docker restart infra_traefik    # une fois, pour charger la route committée
+```
+
+Accès : `https://worktree.docker.test` (Tailscale + basic-auth), cert auto-signé.

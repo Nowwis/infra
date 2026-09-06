@@ -2,3 +2,25 @@ tls:
   certificates:
     - certFile: /etc/certs/docker.localhost.pem
       keyFile: /etc/certs/docker.localhost-key.pem
+
+# wt dashboard — route de la console d'observabilité (worktree.docker.test).
+# Le service (php -S) est fourni hors compose par bin/wt-dash-install (systemd --user),
+# atteint via l'IP Tailscale de l'hôte. Le secret basic-auth n'est PAS ici : il est
+# dans un fichier htpasswd gitignored (certs/wt-dashboard.htpasswd, monté /etc/certs).
+http:
+  routers:
+    wt-dashboard:
+      rule: "Host(`worktree.docker.test`)"
+      entrypoints: [websecure]
+      service: wt-dashboard
+      middlewares: [wt-dashboard-auth]
+      tls: {}
+  services:
+    wt-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://100.75.44.109:8899"
+  middlewares:
+    wt-dashboard-auth:
+      basicAuth:
+        usersFile: "/etc/certs/wt-dashboard.htpasswd"
