@@ -52,9 +52,20 @@ journalctl --user -u now-restore-check.service -n 50
   (`localhost:1025`) ; en prod, un MTA ou un relai SMTP authentifié.
 - **Webhook** : POST JSON `{"text": "..."}` (compatible Slack/Discord/générique).
 
-Alerte déclenchée si : dump en échec/vide, restauration ou `CHECK TABLE` en
-échec, ou **taille du dump hors de ±`SIZE_DEVIATION_PCT`%** de la médiane des
-exécutions précédentes (`.restore-history.csv`).
+**Alerte bloquante** (sujet « ÉCHEC », `exit 1`) si : dump en échec/vide,
+restauration ou `CHECK TABLE` en échec, ou **dump rétréci de plus de
+`SIZE_SHRINK_PCT`%** sous la médiane — un dump qui maigrit signale une perte de
+données ou une troncature.
+
+**Avertissement non bloquant** (sujet « Avertissement volumétrie », `exit 0`) si
+le dump **grossit de plus de `SIZE_GROWTH_PCT`%** au-dessus de la médiane. La
+croissance est le régime normal d'une base en production : la signaler sans
+crier à l'échec évite d'user la vigilance sur l'alerte qui compte.
+
+La médiane porte sur les `HISTORY_WINDOW` derniers **jours** de
+`.restore-history.csv`, à raison d'**un point par jour** (le dernier). Sans cette
+double précaution, plusieurs runs de calibration le même jour figent la médiane
+sur la valeur du premier jour et toute base en croissance alerte indéfiniment.
 
 ## RTO / RPO
 

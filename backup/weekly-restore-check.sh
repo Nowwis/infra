@@ -10,9 +10,13 @@
 #      gzip depuis le conteneur prod (rien n'est écrit sur le disque prod).
 #   2. restore-test.sh : restauration + CHECK TABLE + mesure RTO sur jetable.
 #   3. Contrôle de taille : compare la taille du dump à la médiane des N
-#      dernières exécutions (historique CSV). Alerte si écart > seuil %.
-#   4. Alerte (échec de restore OU taille anormale OU dump vide) par e-mail
-#      SMTP et/ou webhook. Succès → log seulement (option --notify-success).
+#      dernières exécutions (historique CSV, un point par jour). Seuils
+#      ASYMÉTRIQUES : un dump qui rétrécit est une alerte (perte de données
+#      probable), un dump qui grossit est un simple avertissement (croissance
+#      métier normale).
+#   4. Alerte (échec de restore OU rétrécissement OU dump vide) par e-mail
+#      SMTP et/ou webhook, exit 1. Croissance forte → e-mail d'avertissement
+#      mais exit 0. Succès → log seulement (option --notify-success).
 #
 # Conçu pour tourner via systemd timer (voir backup/systemd/) ou cron.
 # Idempotent, sans état partagé hormis l'historique CSV.
@@ -21,7 +25,10 @@
 #   PROD_SSH_HOST       hôte ssh de la prod (ex: bifacto)
 #   PROD_DB_CONTAINER   conteneur MySQL prod (défaut: infra_mysql_8_0)
 #   BACKUP_DATABASES    liste de bases séparées par des espaces
-#   SIZE_DEVIATION_PCT  seuil d'alerte sur la taille (défaut: 40)
+#   SIZE_SHRINK_PCT     rétrécissement max toléré, ALERTE au-delà (défaut: 25)
+#   SIZE_GROWTH_PCT     croissance max tolérée, AVERTISSEMENT au-delà (déf: 100)
+#   HISTORY_WINDOW      nb de jours d'historique pour la médiane (défaut: 8)
+#   SIZE_DEVIATION_PCT  OBSOLÈTE (ancien seuil symétrique) — ignoré.
 #   ALERT_EMAIL_TO      destinataire des alertes (active l'alerte mail)
 #   ALERT_SMTP_HOST/PORT/FROM   serveur SMTP (défaut: localhost:1025 = mailpit)
 #   ALERT_WEBHOOK_URL   URL POST JSON pour alerte (Slack/Discord/générique)
@@ -37,7 +44,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROD_SSH_HOST="${PROD_SSH_HOST:-bifacto}"
 PROD_DB_CONTAINER="${PROD_DB_CONTAINER:-infra_mysql_8_0}"
 BACKUP_DATABASES="${BACKUP_DATABASES:-appbifacto docbifacto}"
-SIZE_DEVIATION_PCT="${SIZE_DEVIATION_PCT:-40}"
+SIZE_SHRINK_PCT="${SIZE_SHRINK_PCT:-25}"
+SIZE_GROWTH_PCT="${SIZE_GROWTH_PCT:-100}"
+HISTORY_WINDOW="${HISTORY_WINDOW:-8}"
 HISTORY_FILE="${HISTORY_FILE:-$SCRIPT_DIR/.restore-history.csv}"
 WORK_ROOT="${WORK_ROOT:-/tmp}"
 ALERT_SMTP_HOST="${ALERT_SMTP_HOST:-localhost}"
@@ -62,7 +71,8 @@ run_prod() {
 
 TS="$(date +%Y%m%d_%H%M%S)"
 WORK="$(mktemp -d "$WORK_ROOT/restore-check.XXXXXX")"
-ALERTS=()       # messages d'alerte accumulés
+ALERTS=()       # anomalies bloquantes (exit 1)
+WARNINGS=()     # signaux non bloquants (e-mail informatif, exit 0)
 trap 'rm -rf "$WORK"' EXIT
 
 # --- alerting ---------------------------------------------------------------
@@ -113,9 +123,19 @@ print(json.dumps({
 # --- historique de taille ---------------------------------------------------
 [ -f "$HISTORY_FILE" ] || echo "# ts,db,bytes" > "$HISTORY_FILE"
 
-median_bytes() { # médiane des tailles historiques d'une base (col 3 où col2=db)
-  awk -F, -v db="$1" '$2==db {print $3}' "$HISTORY_FILE" | sort -n | \
-    awk '{a[NR]=$1} END{if(NR==0){print 0}else if(NR%2){print a[(NR+1)/2]}else{print int((a[NR/2]+a[NR/2+1])/2)}}'
+# Médiane des tailles historiques d'une base, sur une FENÊTRE GLISSANTE des
+# HISTORY_WINDOW derniers JOURS. Un seul point par jour (le dernier) : plusieurs
+# runs le même jour (calibration, relance manuelle) ne doivent pas peser
+# plusieurs fois et figer la médiane sur une valeur ancienne.
+median_bytes() {
+  awk -F, -v db="$1" '$2==db {
+        split($1, t, "_");
+        if (!(t[1] in last)) order[++n] = t[1];
+        last[t[1]] = $3;
+      }
+      END { for (i = 1; i <= n; i++) print last[order[i]] }' "$HISTORY_FILE" \
+    | tail -n "$HISTORY_WINDOW" | sort -n \
+    | awk '{a[NR]=$1} END{if(NR==0){print 0}else if(NR%2){print a[(NR+1)/2]}else{print int((a[NR/2]+a[NR/2+1])/2)}}'
 }
 
 # --- 1. Dump read-only de la prod ------------------------------------------
@@ -139,13 +159,17 @@ REMOTE
     continue
   fi
   bytes=$(stat -c%s "$out")
-  # Contrôle de taille anormale vs médiane historique
+  # Contrôle de taille vs médiane glissante — seuils asymétriques : un dump qui
+  # rétrécit signale une perte de données ou un dump tronqué (bloquant) ; un
+  # dump qui grossit signale une croissance métier (informatif).
   med=$(median_bytes "$db")
   if [ "$med" -gt 0 ]; then
-    lo=$(( med * (100 - SIZE_DEVIATION_PCT) / 100 ))
-    hi=$(( med * (100 + SIZE_DEVIATION_PCT) / 100 ))
-    if [ "$bytes" -lt "$lo" ] || [ "$bytes" -gt "$hi" ]; then
-      ALERTS+=("Taille anormale '$db' : ${bytes}o (médiane ${med}o, seuil ±${SIZE_DEVIATION_PCT}%).")
+    lo=$(( med * (100 - SIZE_SHRINK_PCT) / 100 ))
+    hi=$(( med * (100 + SIZE_GROWTH_PCT) / 100 ))
+    if [ "$bytes" -lt "$lo" ]; then
+      ALERTS+=("Rétrécissement anormal '$db' : ${bytes}o vs médiane ${med}o (max -${SIZE_SHRINK_PCT}%) — dump tronqué ou perte de données ?")
+    elif [ "$bytes" -gt "$hi" ]; then
+      WARNINGS+=("Croissance forte '$db' : ${bytes}o vs médiane ${med}o (max +${SIZE_GROWTH_PCT}%) — à confirmer côté métier.")
     fi
   fi
   echo "$TS,$db,$bytes" >> "$HISTORY_FILE"
@@ -163,12 +187,30 @@ fi
 RESULT_JSON="$(cat "$WORK/restore-test-result.json" 2>/dev/null || echo '{}')"
 
 # --- 3. Verdict + alerte ----------------------------------------------------
+NB_DB="$(echo "$BACKUP_DATABASES" | wc -w)"
+
+# Anomalie bloquante : restauration KO, dump vide/invalide, ou rétrécissement.
 if [ ${#ALERTS[@]} -gt 0 ]; then
   body="Échec du contrôle hebdo de restauration ($TS) :"$'\n'
   for a in "${ALERTS[@]}"; do body+="- $a"$'\n'; done
+  if [ ${#WARNINGS[@]} -gt 0 ]; then
+    body+=$'\n'"Avertissements (non bloquants) :"$'\n'
+    for w in "${WARNINGS[@]}"; do body+="- $w"$'\n'; done
+  fi
   body+=$'\n'"Détail : $RESULT_JSON"
-  send_alert "ÉCHEC contrôle restauration ($(echo "$BACKUP_DATABASES"|wc -w) bases)" "$body"
+  send_alert "ÉCHEC contrôle restauration ($NB_DB bases)" "$body"
   exit 1
+fi
+
+# Restauration OK mais croissance notable : on informe sans crier à l'échec.
+if [ ${#WARNINGS[@]} -gt 0 ]; then
+  body="Restauration VÉRIFIÉE OK ($TS) — aucune anomalie bloquante."$'\n\n'
+  body+="Avertissements de volumétrie :"$'\n'
+  for w in "${WARNINGS[@]}"; do body+="- $w"$'\n'; done
+  body+=$'\n'"Détail : $RESULT_JSON"
+  send_alert "Avertissement volumétrie ($NB_DB bases) — restauration OK" "$body"
+  log "Contrôle hebdo OK — restauration vérifiée, avertissement(s) de volumétrie."
+  exit 0
 fi
 
 log "Contrôle hebdo OK — restauration vérifiée, tailles nominales."
