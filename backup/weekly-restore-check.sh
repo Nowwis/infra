@@ -73,25 +73,30 @@ TS="$(date +%Y%m%d_%H%M%S)"
 WORK="$(mktemp -d "$WORK_ROOT/restore-check.XXXXXX")"
 ALERTS=()       # anomalies bloquantes (exit 1)
 WARNINGS=()     # signaux non bloquants (e-mail informatif, exit 0)
+DB_ROWS=()      # une ligne "db|taille|statut" par base, pour le tableau du mail
 trap 'rm -rf "$WORK"' EXIT
 
 # --- alerting ---------------------------------------------------------------
 send_alert() {
-  local subject="$1" body="$2"
-  err "ALERTE: $subject"
+  local subject="$1" body="$2" body_html="${3:-}"
+  log "Notification : $subject"
   # E-mail via API Brevo (HTTPS, canal fiable en prod). Forcer IPv4 : la clé
   # Brevo est restreinte par IP allow-list (l'IPv6 du serveur n'y est pas).
   if [ -n "${ALERT_BREVO_API_KEY:-}" ] && [ -n "${ALERT_EMAIL_TO:-}" ]; then
     local json
-    json=$(ALERT_SUBJECT="$subject" ALERT_BODY="$body" ALERT_TO="$ALERT_EMAIL_TO" \
+    json=$(ALERT_SUBJECT="$subject" ALERT_BODY="$body" ALERT_HTML="$body_html" ALERT_TO="$ALERT_EMAIL_TO" \
       ALERT_FROM="${ALERT_BREVO_SENDER:-$ALERT_SMTP_FROM}" python3 -c '
 import json,os
-print(json.dumps({
+msg={
   "sender":{"email":os.environ["ALERT_FROM"]},
   "to":[{"email":os.environ["ALERT_TO"]}],
   "subject":"[NOW backup] "+os.environ["ALERT_SUBJECT"],
   "textContent":os.environ["ALERT_BODY"],
-}))')
+}
+html=os.environ.get("ALERT_HTML","")
+if html:
+    msg["htmlContent"]=html
+print(json.dumps(msg))')
     if curl -4 -fsS -m 20 -X POST https://api.brevo.com/v3/smtp/email \
         -H "api-key: $ALERT_BREVO_API_KEY" -H 'Content-Type: application/json' \
         -d "$json" >/dev/null 2>&1; then
@@ -151,14 +156,17 @@ docker exec -i -e MYSQL_PWD="\$RP" $PROD_DB_CONTAINER \
 REMOTE
   then
     ALERTS+=("Dump de '$db' ÉCHOUÉ (ssh/mysqldump).")
+    DB_ROWS+=("$db|—|échec dump")
     continue
   fi
   # gzip valide et non vide ?
   if ! gzip -t "$out" 2>/dev/null || [ ! -s "$out" ]; then
     ALERTS+=("Dump de '$db' invalide ou vide ($(du -h "$out"|cut -f1)).")
+    DB_ROWS+=("$db|$(du -h "$out"|cut -f1)|dump vide/invalide")
     continue
   fi
   bytes=$(stat -c%s "$out")
+  DB_ROWS+=("$db|$(du -h "$out"|cut -f1)|ok")
   # Contrôle de taille vs médiane glissante — seuils asymétriques : un dump qui
   # rétrécit signale une perte de données ou un dump tronqué (bloquant) ; un
   # dump qui grossit signale une croissance métier (informatif).
@@ -186,35 +194,91 @@ else
 fi
 RESULT_JSON="$(cat "$WORK/restore-test-result.json" 2>/dev/null || echo '{}')"
 
-# --- 3. Verdict + alerte ----------------------------------------------------
+# --- 3. Verdict + notification ---------------------------------------------
 NB_DB="$(echo "$BACKUP_DATABASES" | wc -w)"
 
-# Anomalie bloquante : restauration KO, dump vide/invalide, ou rétrécissement.
+# Extrait un entier du rapport JSON de restore-test (0 si absent).
+jnum() { grep -o "\"$1\": *[0-9]*" <<<"$RESULT_JSON" | grep -o '[0-9]*' | head -1; }
+TABLES=$(jnum tables_checked); TABLES=${TABLES:-0}
+BAD=$(jnum tables_non_ok);     BAD=${BAD:-0}
+RTO=$(jnum rto_total);         RTO=${RTO:-0}
+
+# Statut global : rouge si anomalie bloquante, jaune si avertissement, vert sinon.
 if [ ${#ALERTS[@]} -gt 0 ]; then
-  body="Échec du contrôle hebdo de restauration ($TS) :"$'\n'
-  for a in "${ALERTS[@]}"; do body+="- $a"$'\n'; done
-  if [ ${#WARNINGS[@]} -gt 0 ]; then
-    body+=$'\n'"Avertissements (non bloquants) :"$'\n'
-    for w in "${WARNINGS[@]}"; do body+="- $w"$'\n'; done
+  STATUS=fail; COLOR="#dc2626"; ICON="✗"; HEAD="Échec du contrôle de restauration"
+elif [ ${#WARNINGS[@]} -gt 0 ]; then
+  STATUS=warn; COLOR="#d97706"; ICON="⚠"; HEAD="Restauration OK — avertissement de volumétrie"
+else
+  STATUS=ok;   COLOR="#16a34a"; ICON="✓"; HEAD="Restauration vérifiée — tout est OK"
+fi
+
+# Échappe le HTML (noms de bases sûrs, mais les messages d'anomalie sont libres).
+hesc() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+
+# Corps HTML : bandeau coloré + tableau des bases + résumé restauration.
+build_html() {
+  local rows="" d s st cell r a w
+  for r in "${DB_ROWS[@]}"; do
+    IFS='|' read -r d s st <<<"$r"
+    if [ "$st" = ok ]; then
+      cell='<span style="color:#16a34a;font-weight:bold">✓ OK</span>'
+    else
+      cell="<span style=\"color:#dc2626;font-weight:bold\">✗ $(hesc "$st")</span>"
+    fi
+    rows+="<tr><td style=\"padding:8px 10px;border-bottom:1px solid #eef0f2\">$(hesc "$d")</td><td style=\"padding:8px 10px;border-bottom:1px solid #eef0f2;text-align:right\">$(hesc "$s")</td><td style=\"padding:8px 10px;border-bottom:1px solid #eef0f2\">$cell</td></tr>"
+  done
+
+  local restore_line
+  if [ "${RESTORE_OK:-0}" = 1 ]; then restore_line='<b style="color:#16a34a">OK</b>'
+  else restore_line='<b style="color:#dc2626">ÉCHEC</b>'; fi
+
+  local notes=""
+  if [ ${#ALERTS[@]} -gt 0 ]; then
+    notes+='<p style="margin:16px 0 4px;color:#dc2626;font-weight:bold">Anomalies bloquantes</p><ul style="margin:0;padding-left:20px;color:#b91c1c;font-size:14px">'
+    for a in "${ALERTS[@]}"; do notes+="<li style=\"margin:3px 0\">$(hesc "$a")</li>"; done
+    notes+='</ul>'
   fi
-  body+=$'\n'"Détail : $RESULT_JSON"
-  send_alert "ÉCHEC contrôle restauration ($NB_DB bases)" "$body"
-  exit 1
+  if [ ${#WARNINGS[@]} -gt 0 ]; then
+    notes+='<p style="margin:16px 0 4px;color:#b45309;font-weight:bold">Avertissements</p><ul style="margin:0;padding-left:20px;color:#b45309;font-size:14px">'
+    for w in "${WARNINGS[@]}"; do notes+="<li style=\"margin:3px 0\">$(hesc "$w")</li>"; done
+    notes+='</ul>'
+  fi
+
+  cat <<HTML
+<div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;color:#1f2937">
+  <div style="background:$COLOR;color:#ffffff;padding:16px 20px;border-radius:10px 10px 0 0;font-size:17px;font-weight:bold">$ICON&nbsp; $HEAD</div>
+  <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 10px 10px;padding:18px 20px">
+    <p style="margin:0 0 14px;color:#6b7280;font-size:13px">Hôte <b style="color:#1f2937">$(hesc "$PROD_SSH_HOST")</b> &middot; $TS &middot; $NB_DB base(s)</p>
+    <table style="width:100%;border-collapse:collapse;font-size:14px">
+      <thead><tr style="background:#f8fafc;text-align:left">
+        <th style="padding:8px 10px;border-bottom:2px solid #e5e7eb">Base</th>
+        <th style="padding:8px 10px;border-bottom:2px solid #e5e7eb;text-align:right">Taille dump</th>
+        <th style="padding:8px 10px;border-bottom:2px solid #e5e7eb">Dump</th>
+      </tr></thead>
+      <tbody>$rows</tbody>
+    </table>
+    <p style="margin:16px 0 0;font-size:14px">Restauration jetable : $restore_line &middot; <b>$TABLES</b> tables vérifiées, <b>$BAD</b> en erreur &middot; RTO <b>${RTO}s</b></p>
+    $notes
+    <p style="margin:18px 0 0;color:#9ca3af;font-size:12px">Contrôle hebdomadaire de restauration (NOW-25) — dump prod en lecture seule, restauration sur conteneur jetable, aucune écriture sur la prod.</p>
+  </div>
+</div>
+HTML
+}
+
+# Corps texte (repli SMTP/webhook + clients sans HTML).
+body="[$STATUS] $HEAD — hôte $PROD_SSH_HOST ($TS)"$'\n\n'
+for r in "${DB_ROWS[@]}"; do IFS='|' read -r d s st <<<"$r"; body+="- $d : $s ($st)"$'\n'; done
+body+=$'\n'"Restauration jetable : $([ "${RESTORE_OK:-0}" = 1 ] && echo OK || echo ÉCHEC) — $TABLES tables vérifiées, $BAD en erreur, RTO ${RTO}s"$'\n'
+if [ ${#ALERTS[@]} -gt 0 ]; then body+=$'\n'"Anomalies :"$'\n'; for a in "${ALERTS[@]}"; do body+="! $a"$'\n'; done; fi
+if [ ${#WARNINGS[@]} -gt 0 ]; then body+=$'\n'"Avertissements :"$'\n'; for w in "${WARNINGS[@]}"; do body+="~ $w"$'\n'; done; fi
+
+# Échec/avertissement : toujours notifier. Succès : seulement si NOTIFY_SUCCESS=1.
+if [ "$STATUS" != ok ] || [ "$NOTIFY_SUCCESS" = "1" ]; then
+  send_alert "$HEAD — $PROD_SSH_HOST ($NB_DB bases)" "$body" "$(build_html)"
 fi
 
-# Restauration OK mais croissance notable : on informe sans crier à l'échec.
-if [ ${#WARNINGS[@]} -gt 0 ]; then
-  body="Restauration VÉRIFIÉE OK ($TS) — aucune anomalie bloquante."$'\n\n'
-  body+="Avertissements de volumétrie :"$'\n'
-  for w in "${WARNINGS[@]}"; do body+="- $w"$'\n'; done
-  body+=$'\n'"Détail : $RESULT_JSON"
-  send_alert "Avertissement volumétrie ($NB_DB bases) — restauration OK" "$body"
-  log "Contrôle hebdo OK — restauration vérifiée, avertissement(s) de volumétrie."
-  exit 0
-fi
-
-log "Contrôle hebdo OK — restauration vérifiée, tailles nominales."
-if [ "$NOTIFY_SUCCESS" = "1" ]; then
-  send_alert "OK contrôle restauration" "Restauration vérifiée le $TS.\n$RESULT_JSON"
-fi
-exit 0
+case "$STATUS" in
+  fail) log "Contrôle hebdo : ÉCHEC — voir la notification."; exit 1;;
+  warn) log "Contrôle hebdo OK — restauration vérifiée, avertissement(s) de volumétrie."; exit 0;;
+  *)    log "Contrôle hebdo OK — restauration vérifiée, tailles nominales."; exit 0;;
+esac
