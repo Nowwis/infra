@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set +e
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WT_BIN="${WT_METRICS_WT:-$HERE/wt}"
+
+m_system() {
+  local mt ma st sf load ncpu
+  mt=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null); ma=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null)
+  st=$(awk '/^SwapTotal:/{print $2}' /proc/meminfo 2>/dev/null); sf=$(awk '/^SwapFree:/{print $2}' /proc/meminfo 2>/dev/null)
+  load=$(awk '{print $1}' /proc/loadavg 2>/dev/null); ncpu=$(nproc 2>/dev/null || echo 0)
+  local psi; psi=$(awk -F'[= ]' '/^some/{print $3}' /proc/pressure/cpu 2>/dev/null)
+  jq -n --argjson mt "${mt:-0}" --argjson ma "${ma:-0}" --argjson st "${st:-0}" --argjson sf "${sf:-0}" \
+        --argjson load "${load:-0}" --argjson ncpu "${ncpu:-0}" --arg psi "${psi:-}" \
+    '{mem_total_kb:$mt,mem_avail_kb:$ma,swap_total_kb:$st,swap_used_kb:($st-$sf),load1:$load,ncpu:$ncpu,psi_cpu_some_avg10:(try ($psi|tonumber) catch null)}' 2>/dev/null || echo '{}'
+}
+m_disk() {
+  df -P -k 2>/dev/null | awk 'NR>1{printf "%s\t%s\t%s\t%s\t%s\n",$6,$2,$3,$4,$5}' \
+   | jq -R -s 'split("\n")|map(select(length>0)|split("\t")|
+        {mount:.[0],
+         size:((try (.[1]|tonumber) catch null)),
+         used:((try (.[2]|tonumber) catch null)),
+         avail:((try (.[3]|tonumber) catch null)),
+         use_pct:.[4]})' 2>/dev/null || echo '[]'
+}
+m_docker() {
+  docker stats --no-stream --format '{{json .}}' 2>/dev/null \
+   | jq -s 'map({
+        name: (.Name // null),
+        cpu_pct: (.CPUPerc // null),
+        mem_used: ((try ((.MemUsage // "")|split(" / ")[0]) catch null)),
+        mem_pct: (.MemPerc // null),
+        project: ((((.Name // "") | (capture("^(?<p>.+)-[^-]+-[0-9]+$")? // {p:null}).p)) // (.Name // null))
+     })' 2>/dev/null || echo '[]'
+}
+m_worktrees() {
+  local list; list="$("$WT_BIN" list --json 2>/dev/null)"; [ -n "$list" ] || { echo '[]'; return; }
+  printf '%s' "$list" | jq -c '.[]' 2>/dev/null | while read -r e; do
+    local p db; p="$(printf '%s' "$e" | jq -r '.path // empty' 2>/dev/null)"; db=0
+    [ -n "$p" ] && [ -d "$p" ] && db="$(du -sb "$p" 2>/dev/null | awk '{print $1}')"
+    printf '%s' "$e" | jq --argjson d "${db:-0}" '. + {disk_bytes:$d}' 2>/dev/null
+  done | jq -s '.' 2>/dev/null || echo '[]'
+}
+m_sessions() {
+  ps -eo pid=,rss=,pcpu=,etimes=,args= 2>/dev/null \
+   | awk '
+      /[c]laude|remote-control|versions\/.*--print/ {
+        kind="claude"
+        if ($0 ~ /remote-control/) kind="remote-control"
+        else if ($0 ~ /versions\/.*--print/) kind="sdk-backend"
+        model=""
+        for (i=5;i<=NF;i++) if ($i=="--model" && i<NF) { model=$(i+1); break }
+        printf "%s\t%s\t%s\t%s\t%s\t%s\n",$1,$2,$3,$4,kind,model
+      }' \
+   | jq -R -s 'split("\n")|map(select(length>0)|split("\t")|
+        {pid:((try (.[0]|tonumber) catch null)),
+         rss_kb:((try (.[1]|tonumber) catch null)),
+         cpu_pct:((try (.[2]|tonumber) catch null)),
+         etime_s:((try (.[3]|tonumber) catch null)),
+         kind:.[4],
+         model:(if (.[5]//"")=="" then null else .[5] end)})' 2>/dev/null || echo '[]'
+}
+m_all() {
+  jq -n --argjson system "$(m_system)" --argjson disk "$(m_disk)" \
+        --argjson docker "$(m_docker)" --argjson worktrees "$(m_worktrees)" --argjson sessions "$(m_sessions)" \
+    '{system:$system,disk:$disk,docker:$docker,worktrees:$worktrees,sessions:$sessions}' 2>/dev/null || echo '{}'
+}
+case "${1:-}" in
+  system) m_system;; disk) m_disk;; docker) m_docker;; worktrees) m_worktrees;; sessions) m_sessions;; all) m_all;;
+  *) echo "usage: wt-metrics system|disk|docker|worktrees|sessions|all" >&2; exit 2;;
+esac
