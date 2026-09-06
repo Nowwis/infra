@@ -1,0 +1,14 @@
+[Unit]
+Description=NOW — Déclencheur hebdomadaire du contrôle de restauration %i (NOW-25)
+
+[Timer]
+Unit=now-restore-check@%i.service
+# Tous les lundis à 04h30 (heure serveur). Persistent=true → rattrape le run
+# manqué si le serveur était éteint à l'heure prévue. RandomizedDelaySec évite
+# que plusieurs instances (nowis, bifacto…) démarrent exactement en même temps.
+OnCalendar=Mon *-*-* 04:30:00
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

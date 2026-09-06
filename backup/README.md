@@ -10,8 +10,9 @@ et on restaure sur un conteneur MySQL **jetable**, jamais sur la prod.
 |---|---|
 | `restore-test.sh` | Restaure un dossier de dumps `*.sql.gz` sur un conteneur MySQL jetable, lance `CHECK TABLE` sur toutes les tables, mesure le RTO, écrit un rapport JSON. |
 | `weekly-restore-check.sh` | Orchestration hebdo : dump read-only prod → `restore-test.sh` → contrôle de taille anormale → **alerte** (e-mail/webhook) sur échec. |
-| `backup.env.example` | Config (hôte ssh, bases, seuils, alerting). À copier en `backup.env`. |
-| `systemd/now-restore-check.{service,timer}` | Déclencheur hebdomadaire (le serveur n'a pas de `cron`). |
+| `backup.env.example` | Référence complète des variables (config par hôte : bases, seuils, alerting). |
+| `backup.env.<hôte>.example` | Modèles prêts à l'emploi par hôte prod (`nowis`, `bifacto`) → copier en `backup.env.<hôte>`. |
+| `systemd/now-restore-check@.{service,timer}` | Déclencheur hebdomadaire **templaté par hôte** (le serveur n'a pas de `cron`). |
 
 ## Usage manuel
 
@@ -19,32 +20,47 @@ et on restaure sur un conteneur MySQL **jetable**, jamais sur la prod.
 # Test ponctuel d'un dossier de dumps déjà présents
 ./restore-test.sh --backup-dir /chemin/vers/dumps
 
-# Contrôle hebdo complet (dump prod read-only + restore + alerte)
-cp backup.env.example backup.env   # puis éditer
+# Contrôle hebdo complet d'un hôte (dump prod read-only + restore + alerte)
+cp backup.env.nowis.example backup.env.nowis   # puis éditer (clé Brevo)
+set -a; . ./backup.env.nowis; set +a
 ./weekly-restore-check.sh
 ```
 
 `restore-test.sh` sort en code ≠ 0 si une table est corrompue ou si une
 assertion de comptage (`--expect db.table<TAB>n`) échoue.
 
-## Installation du check hebdomadaire (à valider par Simon)
+## Installation du check hebdomadaire (multi-hôtes)
 
-Le serveur `bifacto` n'a **pas** `cron` mais a `systemd` : on utilise un timer
-utilisateur.
+Le serveur n'a **pas** `cron` mais a `systemd` : on utilise un timer utilisateur.
+L'unité est **templatée** — une instance par hôte prod (`nowis`, `bifacto`, …),
+chacune avec sa config `backup.env.<hôte>`.
 
 ```bash
-# Sur le serveur, dans ~/Infra (adapter le chemin)
-cp backup/backup.env.example backup/backup.env && nano backup/backup.env
+# Sur le serveur, dans ~/Project/Infra (adapter le chemin si besoin)
+# 1) Une config par hôte (gitignorée) — renseigner la clé Brevo dans chacune
+cp backup/backup.env.nowis.example   backup/backup.env.nowis
+cp backup/backup.env.bifacto.example backup/backup.env.bifacto
+$EDITOR backup/backup.env.nowis backup/backup.env.bifacto
+
+# 2) Poser l'unité templatée
 mkdir -p ~/.config/systemd/user
-cp backup/systemd/now-restore-check.{service,timer} ~/.config/systemd/user/
+cp backup/systemd/now-restore-check@.{service,timer} ~/.config/systemd/user/
 loginctl enable-linger webadmin
 systemctl --user daemon-reload
-systemctl --user enable --now now-restore-check.timer
-systemctl --user list-timers          # prochain run lundi 04:30
-# Test immédiat :
-systemctl --user start now-restore-check.service
-journalctl --user -u now-restore-check.service -n 50
+
+# 3) Une instance par hôte
+systemctl --user enable --now now-restore-check@nowis.timer
+systemctl --user enable --now now-restore-check@bifacto.timer
+systemctl --user list-timers            # prochains runs lundi ~04:30
+
+# Test immédiat d'un hôte :
+systemctl --user start now-restore-check@bifacto.service
+journalctl --user -u now-restore-check@bifacto.service -n 50
 ```
+
+> ⚠️ Ne PAS créer de fichier `backup/backup.env` (sans suffixe d'hôte) : il
+> serait sourcé par le script et écraserait la config d'instance passée par
+> systemd. La config vit uniquement dans `backup.env.<hôte>`.
 
 ## Alerting
 
