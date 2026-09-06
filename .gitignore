@@ -12,5 +12,7 @@
 !/letsencrypt/.gitkeep
 
 .env
+# secret du dashboard (le htpasswd est déjà couvert par /configuration/traefik2/certs/*)
+/dashboard/dashboard.env
 # backups locaux (env/compose)
 *.bak
