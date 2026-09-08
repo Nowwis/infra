@@ -34,12 +34,13 @@ cmd_destroy() {
 
   wt_reg_exists "$project" || die "env not managed by wt: $project"
 
-  local e path db branch reg_compose
+  local e path db branch reg_compose reg_db_container
   e="$(wt_reg_get "$project")"
   path="$(jq -r '.path // empty' <<<"$e")"
   db="$(jq -r '.db // empty' <<<"$e")"
   branch="$(jq -r '.branch // empty' <<<"$e")"
   reg_compose="$(jq -r '.compose // empty' <<<"$e")"
+  reg_db_container="$(jq -r '.db_container // empty' <<<"$e")"
 
   # Profile lookup is best-effort: tolerate a missing/unset WT_APPS_FILE
   # entirely (do not fall back to a machine-local default apps.conf), so
@@ -87,6 +88,15 @@ cmd_destroy() {
   confirm "destroy '$project' ?" || die "aborted"
 
   wt_docker_down "$path" "$compose" "$project"
+
+  # Cible le bon conteneur DB pour le DROP : valeur enregistrée à la création,
+  # sinon dérivée du .env.local du worktree, sinon défaut de db.sh. Évite de
+  # DROP sur le mauvais moteur (mysql vs mariadb).
+  if [ -n "$reg_db_container" ]; then
+    WT_DB_CONTAINER="$reg_db_container"
+  else
+    wt_db_resolve_container "$path/.env.local"
+  fi
   wt_db_drop "$db"
 
   if [ -n "$repo" ]; then
