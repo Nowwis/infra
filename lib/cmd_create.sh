@@ -107,6 +107,9 @@ cmd_create() {
   fi
 
   # --- database ---
+  # Cible DB alignée sur l'app : le host du DATABASE_URL de l'app désigne le
+  # conteneur (infra_mysql_8_0 / infra_mariadb_11_3) où sa base doit vivre.
+  wt_db_resolve_container "$repo/.env.local"
   wt_db_create "$db" "$pass"
   did_db=1
 
@@ -125,7 +128,8 @@ cmd_create() {
       --arg project "$project" --arg app "$app" --arg slug "$slug" \
       --arg domain "$domain" --arg db "$db" --arg path "$path" \
       --arg branch "$branch" --arg base "$base" --arg compose "$compose" \
-      '{project:$project,app:$app,slug:$slug,domain:$domain,db:$db,path:$path,branch:$branch,base:$base,compose:$compose}')"
+      --arg db_container "$WT_DB_CONTAINER" \
+      '{project:$project,app:$app,slug:$slug,domain:$domain,db:$db,path:$path,branch:$branch,base:$base,compose:$compose,db_container:$db_container}')"
   else
     log "plan: register env '$project' in registry"
   fi
