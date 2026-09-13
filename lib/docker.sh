@@ -11,7 +11,7 @@ wt_docker_up() { # path compose project
   fi
   # --wait a rendu la main en erreur : un service n'est jamais devenu healthy.
   # Sans les logs, le message de docker ne dit pas lequel ni pourquoi.
-  warn "un service n'est pas devenu sain en ${WT_UP_TIMEOUT}s — etat et logs :"
+  warn "un service n'est pas devenu sain (delai max ${WT_UP_TIMEOUT}s) — etat et logs :"
   ( [ -d "$p" ] && cd "$p"
     docker compose -p "$project" -f "$compose" ps 2>&1 || true
     docker compose -p "$project" -f "$compose" logs --tail=40 2>&1 || true ) >&2

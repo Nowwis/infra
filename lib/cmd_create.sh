@@ -68,13 +68,22 @@ cmd_create() {
     trap - ERR
     if [ "$keep_on_error" = "1" ]; then
       warn "keep-on-error: leaving partial env '$project' in place"
-      return 0
+      exit 1
     fi
     warn "rolling back '$project'"
+    # Ordre impose : les conteneurs d'abord, le worktree en DERNIER. Leur
+    # working_dir pointe dans le worktree ; le supprimer avant de les arreter
+    # laisse des conteneurs dont le repertoire courant n'existe plus, et tout
+    # `docker exec` echoue alors en « working directory is outside of container
+    # mount namespace root ».
     [ "$did_up" = "1" ]       && wt_docker_down "$path" "$compose" "$project"
     [ "$did_db" = "1" ]       && wt_db_drop "$db"
     [ "$did_worktree" = "1" ] && wt_git_remove_worktree "$repo" "$path"
-    return 0
+    # `exit` et non `return` : en rendant la main avec 0, le trap laissait la
+    # creation se poursuivre sur un environnement qu'il venait d'annuler, et
+    # `wt create` finissait par annoncer « ready » puis enregistrer au registre
+    # un environnement inexistant.
+    exit 1
   }
   trap '_wt_create_rollback' ERR
 
@@ -85,8 +94,12 @@ cmd_create() {
 
   # --- git: fetch + worktree ---
   wt_run git -C "$repo" fetch origin
-  wt_git_add_worktree "$repo" "origin/$base" "$branch" "$path"
+  # Drapeau pose AVANT l'action : une etape qui echoue a mi-chemin laisse malgre
+  # tout des residus, et le rollback doit les voir. Auparavant `wt_docker_up`
+  # echouait avant `did_up=1`, donc le rollback ne descendait pas les conteneurs
+  # et supprimait le worktree sous leurs pieds.
   did_worktree=1
+  wt_git_add_worktree "$repo" "origin/$base" "$branch" "$path"
 
   # --- runtime files (Ruling D: guarded, no fs writes in dry-run) ---
   # Untracked runtime files (.env.local, .env.test.local, .mcp.json) are NOT
@@ -110,12 +123,12 @@ cmd_create() {
   # Cible DB alignée sur l'app : le host du DATABASE_URL de l'app désigne le
   # conteneur (infra_mysql_8_0 / infra_mariadb_11_3) où sa base doit vivre.
   wt_db_resolve_container "$repo/.env.local"
-  wt_db_create "$db" "$pass"
   did_db=1
+  wt_db_create "$db" "$pass"
 
   # --- docker up ---
-  wt_docker_up "$path" "$compose" "$project"
   did_up=1
+  wt_docker_up "$path" "$compose" "$project"
 
   # --- install ---
   if [ -n "$install" ]; then
