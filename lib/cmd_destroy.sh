@@ -117,7 +117,21 @@ cmd_destroy() {
   wt_db_drop "$db" || { warn "DROP DATABASE $db : echec"; leftovers=1; }
 
   if [ -n "$repo" ]; then
-    wt_git_remove_worktree "$repo" "$path" || { warn "worktree non retire : $path"; leftovers=1; }
+    if ! wt_git_remove_worktree "$repo" "$path"; then
+      warn "worktree non retire : $path"
+      # Cause la plus frequente : un conteneur tournant en root a depose des
+      # fichiers dans le worktree via un bind mount (historiquement les logs
+      # nginx). Sans ce diagnostic, l'utilisateur ne voit qu'un « Permission
+      # denied » sans savoir quoi corriger.
+      local foreign
+      foreign="$(find "$path" ! -user "$(id -un)" -printf '%u %p\n' 2>/dev/null | head -5)"
+      if [ -n "$foreign" ]; then
+        warn "fichiers appartenant a un autre utilisateur (extrait) :"
+        printf '    %s\n' "$foreign" >&2
+        warn "corriger avec : sudo chown -R $(id -un): $path  puis relancer destroy"
+      fi
+      leftovers=1
+    fi
   else
     warn "depot proprietaire introuvable, worktree laisse en place : $path"; leftovers=1
   fi
