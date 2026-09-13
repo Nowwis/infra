@@ -14,3 +14,12 @@ setup() { setup_wt; source "$WT_ROOT/lib/docker.sh"; export WT_DRY_RUN=1; }
   [ "$status" -eq 0 ]
   [[ "$output" =~ ^[0-9]+$ ]]
 }
+@test "up waits for healthchecks with a bounded timeout" {
+  run wt_docker_up /home/x/wt/app-x .docker/docker-compose.yml app-x
+  [[ "$output" == *"--wait"* ]]
+  [[ "$output" == *"--wait-timeout 180"* ]]
+}
+@test "up timeout is overridable" {
+  WT_UP_TIMEOUT=42 run wt_docker_up /home/x/wt/app-x .docker/docker-compose.yml app-x
+  [[ "$output" == *"--wait-timeout 42"* ]]
+}

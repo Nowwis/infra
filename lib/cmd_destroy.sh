@@ -34,13 +34,14 @@ cmd_destroy() {
 
   wt_reg_exists "$project" || die "env not managed by wt: $project"
 
-  local e path db branch reg_compose reg_db_container
+  local e path db branch reg_compose reg_db_container reg_repo
   e="$(wt_reg_get "$project")"
   path="$(jq -r '.path // empty' <<<"$e")"
   db="$(jq -r '.db // empty' <<<"$e")"
   branch="$(jq -r '.branch // empty' <<<"$e")"
   reg_compose="$(jq -r '.compose // empty' <<<"$e")"
   reg_db_container="$(jq -r '.db_container // empty' <<<"$e")"
+  reg_repo="$(jq -r '.repo // empty' <<<"$e")"
 
   # Profile lookup is best-effort: tolerate a missing/unset WT_APPS_FILE
   # entirely (do not fall back to a machine-local default apps.conf), so
@@ -48,8 +49,19 @@ cmd_destroy() {
   if [ -n "${WT_APPS_FILE:-}" ] && [ -f "$WT_APPS_FILE" ]; then
     wt_profile_load "$WT_APPS_FILE" 2>/dev/null || true
   fi
+  # Depot proprietaire, par ordre de fiabilite decroissante :
+  #   1. celui memorise au create ;
+  #   2. celui derive du worktree lui-meme (--git-common-dir), toujours exact ;
+  #   3. celui du profil, si un apps.conf a ete fourni.
+  # Sans ces deux premiers recours, `repo` restait vide des que WT_APPS_FILE
+  # n'etait pas defini, et le `git worktree remove` de repli s'executait dans le
+  # REPERTOIRE COURANT, donc sur un autre depot : « is not a working tree ».
   local repo compose
-  repo="$(wt_profile_get "$app" repo 2>/dev/null || true)"
+  repo="${reg_repo:-}"
+  if [ -z "$repo" ] && [ -d "$path" ]; then
+    repo="$(wt_git_owner_repo "$path" 2>/dev/null || true)"
+  fi
+  [ -n "$repo" ] || repo="$(wt_profile_get "$app" repo 2>/dev/null || true)"
   compose="${reg_compose:-$(wt_profile_get "$app" compose 2>/dev/null || true)}"
   compose="${compose:-.docker/docker-compose.yml}"
 
@@ -87,7 +99,12 @@ cmd_destroy() {
 
   confirm "destroy '$project' ?" || die "aborted"
 
-  wt_docker_down "$path" "$compose" "$project"
+  # La suppression doit aller jusqu'au bout : chaque etape est best-effort et on
+  # signale ce qui reste. Avant, `set -e` interrompait des la premiere erreur et
+  # laissait une entree de registre fantome pointant vers un environnement a
+  # moitie detruit, impossible a rejouer.
+  local leftovers=0
+  wt_docker_down "$path" "$compose" "$project" || { warn "conteneurs/volumes : echec"; leftovers=1; }
 
   # Cible le bon conteneur DB pour le DROP : valeur enregistrée à la création,
   # sinon dérivée du .env.local du worktree, sinon défaut de db.sh. Évite de
@@ -97,16 +114,16 @@ cmd_destroy() {
   else
     wt_db_resolve_container "$path/.env.local"
   fi
-  wt_db_drop "$db"
+  wt_db_drop "$db" || { warn "DROP DATABASE $db : echec"; leftovers=1; }
 
   if [ -n "$repo" ]; then
-    wt_git_remove_worktree "$repo" "$path"
+    wt_git_remove_worktree "$repo" "$path" || { warn "worktree non retire : $path"; leftovers=1; }
   else
-    wt_run git worktree remove --force "$path"
+    warn "depot proprietaire introuvable, worktree laisse en place : $path"; leftovers=1
   fi
 
   if [ "$prune" = 1 ] && [ -n "$repo" ] && [ -n "$branch" ]; then
-    wt_run git -C "$repo" branch -d "$branch"
+    wt_run git -C "$repo" branch -d "$branch" || warn "branche $branch non supprimee"
   fi
 
   # Ruling D: guarded — no direct registry mutation while WT_DRY_RUN=1.
@@ -114,5 +131,9 @@ cmd_destroy() {
     wt_reg_remove "$project"
   fi
 
-  ok "destroyed $project"
+  if [ "$leftovers" = 1 ]; then
+    warn "destroyed $project, avec des residus signales ci-dessus (voir: wt doctor)"
+  else
+    ok "destroyed $project"
+  fi
 }

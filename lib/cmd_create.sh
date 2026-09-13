@@ -128,8 +128,8 @@ cmd_create() {
       --arg project "$project" --arg app "$app" --arg slug "$slug" \
       --arg domain "$domain" --arg db "$db" --arg path "$path" \
       --arg branch "$branch" --arg base "$base" --arg compose "$compose" \
-      --arg db_container "$WT_DB_CONTAINER" \
-      '{project:$project,app:$app,slug:$slug,domain:$domain,db:$db,path:$path,branch:$branch,base:$base,compose:$compose,db_container:$db_container}')"
+      --arg db_container "$WT_DB_CONTAINER" --arg repo "$repo" \
+      '{project:$project,app:$app,slug:$slug,domain:$domain,db:$db,path:$path,branch:$branch,base:$base,compose:$compose,db_container:$db_container,repo:$repo}')"
   else
     log "plan: register env '$project' in registry"
   fi
