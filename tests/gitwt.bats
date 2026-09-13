@@ -21,3 +21,14 @@ setup() {
   wt_git_remove_worktree "$REPO" "$p"
   [ ! -d "$p" ]
 }
+@test "owner_repo derives the main checkout from a linked worktree" {
+  local p="$BATS_TEST_TMPDIR/wt3"
+  wt_git_add_worktree "$REPO" develop feature/z "$p"
+  run wt_git_owner_repo "$p"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$REPO" ]
+}
+@test "owner_repo fails outside any repository" {
+  run wt_git_owner_repo "$BATS_TEST_TMPDIR"
+  [ "$status" -ne 0 ]
+}
