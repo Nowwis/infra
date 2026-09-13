@@ -7,7 +7,8 @@ setup() { setup_wt; source "$WT_ROOT/lib/docker.sh"; export WT_DRY_RUN=1; }
 }
 @test "down emits compose down -v" {
   run wt_docker_down /home/x/wt/app-x .docker/docker-compose.yml app-x
-  [[ "$output" == *"docker compose -p app-x -f .docker/docker-compose.yml down -v"* ]]
+  [[ "$output" == *"docker compose -p app-x -f .docker/docker-compose.yml"* ]]
+  [[ "$output" == *"down -v"* ]]
 }
 @test "status prints running container count" {
   run wt_docker_status app-x
@@ -22,4 +23,9 @@ setup() { setup_wt; source "$WT_ROOT/lib/docker.sh"; export WT_DRY_RUN=1; }
 @test "up timeout is overridable" {
   WT_UP_TIMEOUT=42 run wt_docker_up /home/x/wt/app-x .docker/docker-compose.yml app-x
   [[ "$output" == *"--wait-timeout 42"* ]]
+}
+@test "down covers services from every profile" {
+  run wt_docker_down /home/x/wt/app-x .docker/docker-compose.yml app-x
+  [[ "$output" == *"--profile"* ]]
+  [[ "$output" == *"down -v"* ]]
 }

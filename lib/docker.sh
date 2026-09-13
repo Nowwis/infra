@@ -19,7 +19,13 @@ wt_docker_up() { # path compose project
 }
 wt_docker_down() { # path compose project
   local p="$1"
-  ( [ -d "$p" ] && cd "$p"; wt_run docker compose -p "$3" -f "$2" down -v )
+  # `--profile "*"` : SANS lui, `down` ignore les services des profils non
+  # actives — ils survivent a la destruction. Avec `restart: unless-stopped`,
+  # un worker orphelin redemarre en boucle et RECREE son point de montage en
+  # root, donc le worktree repousse juste apres avoir ete supprime et `doctor`
+  # signale un ORPHAN-DIR sans cause apparente. Constate le 13/09 sur deux
+  # environnements de validation.
+  ( [ -d "$p" ] && cd "$p"; wt_run docker compose -p "$3" -f "$2" --profile '*' down -v )
 }
 wt_docker_status() { # project -> count of running containers
   docker ps --filter "label=com.docker.compose.project=$1" -q 2>/dev/null | wc -l
