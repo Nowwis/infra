@@ -7,7 +7,7 @@ setup() {
 @test "wt-metrics all is valid JSON with all sections" {
   run "$WT_ROOT/bin/wt-metrics" all
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e 'has("system") and has("docker") and has("worktrees") and has("sessions") and has("disk")' >/dev/null
+  echo "$output" | jq -e 'has("system") and has("docker") and has("sessions") and has("disk") and (has("worktrees")|not)' >/dev/null
 }
 
 @test "router serves index.html for /" {

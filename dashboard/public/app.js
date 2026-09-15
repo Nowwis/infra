@@ -145,33 +145,6 @@
     });
   }
 
-  // --- worktrees ----------------------------------------------------------
-  function renderWorktrees(list) {
-    setCount('worktrees', (list || []).length);
-    setEmpty('worktrees', !(list || []).length);
-    var host = panel('worktrees').querySelector('[data-rows]');
-    clear(host);
-    (list || []).forEach(function (w) {
-      var box = el('div', 'wt');
-      box.dataset.search = ((w.project || '') + ' ' + (w.branch || '') + ' ' + (w.domain || '')).toLowerCase();
-      var top = el('div', 'wt-top');
-      top.appendChild(el('span', 'wt-name', w.project || '—'));
-      if (w.domain) top.appendChild(el('span', 'wt-dom', w.domain));
-      var act = el('div', 'wt-actions');
-      if (w.domain) { var a = el('a', 'btn', 'Ouvrir'); a.href = 'https://' + w.domain; a.target = '_blank'; a.rel = 'noopener'; act.appendChild(a); }
-      var del = el('button', 'btn danger', 'Supprimer');
-      del.addEventListener('click', function () { destroy(w.project); });
-      act.appendChild(del);
-      top.appendChild(act);
-      box.appendChild(top);
-      var sub = el('div', 'wt-sub');
-      if (w.branch) sub.appendChild(el('span', null, w.branch));
-      sub.appendChild(el('span', null, 'disque ' + bytes(w.disk_bytes)));
-      box.appendChild(sub);
-      host.appendChild(box);
-    });
-  }
-
   // --- disque -------------------------------------------------------------
   function renderDisk(list) {
     setCount('disk', (list || []).length);
@@ -208,22 +181,12 @@
         if (t && vis > 0) g.open = true;
       });
     });
-    // lignes simples (worktrees, disk)
-    ['worktrees', 'disk'].forEach(function (id) {
+    // lignes simples (disk)
+    ['disk'].forEach(function (id) {
       panel(id).querySelectorAll('[data-search]').forEach(function (r) {
         r.classList.toggle('hidden', !!t && (r.dataset.search || '').indexOf(t) < 0);
       });
     });
-  }
-
-  // --- actions ------------------------------------------------------------
-  function destroy(project) {
-    if (!project) return;
-    if (!window.confirm('Supprimer le worktree-env « ' + project + ' » ?\n(docker down + drop DB + suppression du worktree)')) return;
-    fetch('/api/worktrees/' + encodeURIComponent(project) + '/destroy', { method: 'POST' })
-      .then(function (r) { if (!r.ok) alert('Échec de la suppression (' + r.status + ').'); })
-      .catch(function () { alert('Échec réseau lors de la suppression.'); })
-      .then(refresh);
   }
 
   // --- cycle --------------------------------------------------------------
@@ -239,7 +202,6 @@
         renderVitals(data.system, data.disk);
         renderDocker(data.docker);
         renderSessions(data.sessions);
-        renderWorktrees(data.worktrees);
         renderDisk(data.disk);
         applyFilter();
         setStatus('live', 'actualisé à l’instant');

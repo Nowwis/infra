@@ -10,9 +10,10 @@ setup() { setup_wt; M="$WT_ROOT/bin/wt-metrics"; }
   [ "$status" -eq 0 ]
   echo "$output" | jq -e 'type=="array" and (length>=1) and (.[0]|has("mount") and has("use_pct"))' >/dev/null
 }
-@test "all emits an object with the five sections" {
+@test "all emits an object with the four sections and no worktrees" {
   run "$M" all
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e 'has("system") and has("disk") and has("docker") and has("worktrees") and has("sessions")' >/dev/null
+  echo "$output" | jq -e 'has("system") and has("disk") and has("docker") and has("sessions") and (has("worktrees")|not)' >/dev/null
 }
+@test "worktrees section no longer exists" { run "$M" worktrees; [ "$status" -ne 0 ]; }
 @test "unknown section fails" { run "$M" bogus; [ "$status" -ne 0 ]; }

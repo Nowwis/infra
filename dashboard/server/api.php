@@ -18,14 +18,14 @@ function wt_dash_cache_path(): string
 /** The safe default payload used whenever wt-metrics is unavailable or emits invalid output. */
 function wt_api_metrics_default(): string
 {
-    return '{"system":{},"disk":[],"docker":[],"worktrees":[],"sessions":[]}';
+    return '{"system":{},"disk":[],"docker":[],"sessions":[]}';
 }
 
 /**
  * Aggregated dashboard metrics as a JSON string.
  * Runs `wt-metrics all`, cached to a file for ~2s to avoid re-shelling on
  * every request. On invalid, empty, or failing output, falls back to a safe
- * default JSON object carrying all five expected keys.
+ * default JSON object carrying all four expected keys.
  */
 function wt_api_metrics(): string
 {
@@ -94,15 +94,6 @@ function wt_api_csv(): string
             $name = is_array($c) ? ($c['name'] ?? '') : '';
             $cpu = is_array($c) ? ($c['cpu_pct'] ?? '') : '';
             $rows[] = ['docker', (string) $name, 'cpu_pct=' . (string) $cpu];
-        }
-    }
-
-    $worktrees = $metrics['worktrees'] ?? [];
-    if (is_array($worktrees)) {
-        foreach ($worktrees as $w) {
-            $project = is_array($w) ? ($w['project'] ?? '') : '';
-            $disk_bytes = is_array($w) ? ($w['disk_bytes'] ?? '') : '';
-            $rows[] = ['worktree', (string) $project, 'disk_bytes=' . (string) $disk_bytes];
         }
     }
 

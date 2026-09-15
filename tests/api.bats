@@ -43,14 +43,14 @@ setup() {
   printf '#!/bin/bash\necho "not json"\n' > "$BIN/wt-metrics"; chmod +x "$BIN/wt-metrics"
   run php -r 'require getenv("WT_ROOT")."/dashboard/server/api.php"; echo wt_api_metrics();'
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e 'has("system") and has("disk") and has("docker") and has("worktrees") and has("sessions")' >/dev/null
+  echo "$output" | jq -e 'has("system") and has("disk") and has("docker") and has("sessions") and (has("worktrees")|not)' >/dev/null
 }
 
 @test "metrics endpoint degrades to a safe default when wt-metrics emits nothing" {
   printf '#!/bin/bash\ntrue\n' > "$BIN/wt-metrics"; chmod +x "$BIN/wt-metrics"
   run php -r 'require getenv("WT_ROOT")."/dashboard/server/api.php"; echo wt_api_metrics();'
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e 'has("system") and has("disk") and has("docker") and has("worktrees") and has("sessions")' >/dev/null
+  echo "$output" | jq -e 'has("system") and has("disk") and has("docker") and has("sessions") and (has("worktrees")|not)' >/dev/null
 }
 
 @test "router dispatches GET /api/metrics with JSON content type" {
@@ -75,16 +75,14 @@ setup() {
   [[ "$output" == *","* ]]
 }
 
-@test "router does not require destroy.php for a plain metrics GET" {
-  # destroy.php's require lives inside the POST /destroy branch only, so a
-  # plain metrics GET must never touch it (even now that Task 4 exists).
+@test "router answers not found to the former POST destroy route" {
   run php -r '
-    $_SERVER["REQUEST_URI"]="/api/metrics"; $_SERVER["REQUEST_METHOD"]="GET";
+    $_SERVER["REQUEST_URI"]="/api/worktrees/x/destroy"; $_SERVER["REQUEST_METHOD"]="POST";
     require getenv("WT_ROOT")."/dashboard/server/router.php";
-    var_dump(function_exists("wt_api_destroy"));
   '
   [ "$status" -eq 0 ]
-  [[ "$output" == *"bool(false)"* ]]
+  [[ "$output" == *"not found"* ]]
+  [ ! -f "$WT_ROOT/dashboard/server/destroy.php" ]
 }
 
 @test "router serves an existing static file from dashboard/public by returning false" {

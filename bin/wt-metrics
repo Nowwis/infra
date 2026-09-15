@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 set +e
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WT_BIN="${WT_METRICS_WT:-$HERE/wt}"
 
 m_system() {
   local mt ma st sf load ncpu
@@ -31,14 +29,6 @@ m_docker() {
         mem_pct: (.MemPerc // null),
         project: ((((.Name // "") | (capture("^(?<p>.+)-[^-]+-[0-9]+$")? // {p:null}).p)) // (.Name // null))
      })' 2>/dev/null || echo '[]'
-}
-m_worktrees() {
-  local list; list="$("$WT_BIN" list --json 2>/dev/null)"; [ -n "$list" ] || { echo '[]'; return; }
-  printf '%s' "$list" | jq -c '.[]' 2>/dev/null | while read -r e; do
-    local p db; p="$(printf '%s' "$e" | jq -r '.path // empty' 2>/dev/null)"; db=0
-    [ -n "$p" ] && [ -d "$p" ] && db="$(du -sb "$p" 2>/dev/null | awk '{print $1}')"
-    printf '%s' "$e" | jq --argjson d "${db:-0}" '. + {disk_bytes:$d}' 2>/dev/null
-  done | jq -s '.' 2>/dev/null || echo '[]'
 }
 m_sessions() {
   ps -eo pid=,rss=,pcpu=,etimes=,args= 2>/dev/null \
@@ -76,10 +66,10 @@ m_sessions() {
 }
 m_all() {
   jq -n --argjson system "$(m_system)" --argjson disk "$(m_disk)" \
-        --argjson docker "$(m_docker)" --argjson worktrees "$(m_worktrees)" --argjson sessions "$(m_sessions)" \
-    '{system:$system,disk:$disk,docker:$docker,worktrees:$worktrees,sessions:$sessions}' 2>/dev/null || echo '{}'
+        --argjson docker "$(m_docker)" --argjson sessions "$(m_sessions)" \
+    '{system:$system,disk:$disk,docker:$docker,sessions:$sessions}' 2>/dev/null || echo '{}'
 }
 case "${1:-}" in
-  system) m_system;; disk) m_disk;; docker) m_docker;; worktrees) m_worktrees;; sessions) m_sessions;; all) m_all;;
-  *) echo "usage: wt-metrics system|disk|docker|worktrees|sessions|all" >&2; exit 2;;
+  system) m_system;; disk) m_disk;; docker) m_docker;; sessions) m_sessions;; all) m_all;;
+  *) echo "usage: wt-metrics system|disk|docker|sessions|all" >&2; exit 2;;
 esac
