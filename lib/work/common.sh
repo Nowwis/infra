@@ -100,3 +100,8 @@ work_sync_bases() {
     fi
   done
 }
+
+# État GitHub de la PR d'une branche (OPEN, MERGED, CLOSED) ; vide si aucune.
+work_pr_state() {
+  ( cd "$WP_REPO" && gh pr view "$1" --json state --jq .state 2>/dev/null ) || true
+}
