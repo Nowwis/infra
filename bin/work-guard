@@ -1,0 +1,402 @@
+#!/usr/bin/env python3
+"""work-guard — hook PreToolUse : bloque les écritures Claude sur un projet sans ticket
+démarré, ou dont le ticket est tenu par une autre session
+(docs/2026-09-15-work-console-design.md §4.4).
+
+  work-guard                            mode hook : JSON PreToolUse sur stdin ; exit 2 = bloqué
+  work-guard --classify CMD --cwd DIR   affiche {"targets": [...]} : chemins écrits par une commande Bash
+
+Fail-open : toute erreur interne laisse passer (exit 0). WORK_GUARD=off désactive la garde.
+"""
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+CONF = os.environ.get("WORK_CONF") or os.path.join(ROOT, "etc/work/projects.conf")
+SESSIONS_DIR = os.environ.get("WORK_SESSIONS_DIR") or os.path.expanduser("~/.claude/sessions")
+
+WRITE_TOOLS = {"Edit", "MultiEdit", "Write", "NotebookEdit"}
+
+# ── Classifieur de commandes Bash ─────────────────────────────────────────────
+
+SEPARATORS = {"&&", "||", ";", ";;", "|", "|&", "&", "(", ")"}
+OUT_REDIRS = {">", ">>", ">|", "&>", "&>>", ">&"}
+IN_REDIRS = {"<", "<<", "<<<", "<&", "<>"}
+PREFIXES = {"sudo", "env", "time", "nohup", "command", "exec", "nice", "xargs"}
+SHELLS = {"bash", "sh", "zsh", "dash"}
+
+FILE_WRITE = {"rm", "mv", "cp", "touch", "mkdir", "rmdir", "ln", "chmod", "chown", "chgrp",
+              "truncate", "patch", "tee", "install", "unlink"}
+GIT_WRITE = {"commit", "checkout", "switch", "merge", "rebase", "reset", "revert", "restore",
+             "pull", "push", "cherry-pick", "am", "apply", "clean", "rm", "mv", "clone", "init"}
+GIT_BRANCH_MUTATING = {"-d", "-D", "--delete", "-m", "-M", "--move", "-c", "-C", "--copy", "-f",
+                       "--force", "-u", "--set-upstream-to", "--unset-upstream", "--edit-description",
+                       "-t", "--track", "--no-track"}
+GIT_BRANCH_LISTING = {"-a", "--all", "-r", "--remotes", "-l", "--list", "-v", "-vv", "--verbose",
+                      "--show-current", "--contains", "--no-contains", "--merged", "--no-merged",
+                      "--points-at", "--color", "--no-color", "--column", "--no-column"}
+COMPOSER_WRITE = {"install", "update", "upgrade", "require", "remove", "dump-autoload", "reinstall",
+                  "create-project"}
+NODE_WRITE = {"install", "i", "ci", "add", "remove", "uninstall", "rm", "update", "upgrade", "up"}
+COMPOSE_WRITE = {"up", "down", "build", "restart", "rm", "create"}
+COMPOSE_GLOBAL_VALUE_OPTS = {"-f", "--file", "-p", "--project-name", "--profile", "--env-file",
+                             "--project-directory", "--ansi", "--progress", "--parallel"}
+COMPOSE_EXEC_VALUE_OPTS = {"-u", "--user", "-w", "--workdir", "-e", "--env", "--name", "--entrypoint",
+                           "-p", "--publish", "-v", "--volume", "-l", "--label", "--index"}
+
+
+def resolve(path, cwd):
+    path = os.path.expanduser(path)
+    if not os.path.isabs(path):
+        path = os.path.join(cwd, path)
+    return os.path.normpath(path)
+
+
+def abs_args(args):
+    return [os.path.normpath(a) for a in args if a.startswith("/")]
+
+
+def tokenize(cmd):
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        return list(lex)
+    except ValueError:
+        return cmd.split()
+
+
+def segments(tokens):
+    seg = []
+    for t in tokens:
+        if t in SEPARATORS:
+            if seg:
+                yield seg
+            seg = []
+        else:
+            seg.append(t)
+    if seg:
+        yield seg
+
+
+def strip_redirections(seg, cwd, targets):
+    words, i = [], 0
+    while i < len(seg):
+        t = seg[i]
+        if t in OUT_REDIRS or t in IN_REDIRS:
+            if t in OUT_REDIRS and i + 1 < len(seg):
+                dest = seg[i + 1]
+                if not dest.isdigit() and dest != "-":
+                    p = resolve(dest, cwd)
+                    if not (p == "/tmp" or p.startswith("/tmp/") or p.startswith("/dev/")):
+                        targets.append(p)
+            i += 2
+            continue
+        words.append(t)
+        i += 1
+    return words
+
+
+def first_positional(args, value_opts=()):
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in value_opts:
+            i += 2
+            continue
+        if a.startswith("-"):
+            i += 1
+            continue
+        return i
+    return None
+
+
+def git_targets(args, cwd):
+    d, i = cwd, 0
+    while i < len(args):
+        a = args[i]
+        if a == "-C" and i + 1 < len(args):
+            d = resolve(args[i + 1], d)
+            i += 2
+        elif a in ("-c", "--git-dir", "--work-tree", "--namespace") and i + 1 < len(args):
+            i += 2
+        elif a.startswith("-"):
+            i += 1
+        else:
+            break
+    if i >= len(args):
+        return []
+    sub, rest = args[i], args[i + 1:]
+    if sub in GIT_WRITE:
+        write = True
+    elif sub == "stash":
+        write = not rest or rest[0] not in ("list", "show")
+    elif sub == "tag":
+        write = any(not r.startswith("-") for r in rest) and not any(
+            r in ("-l", "--list", "-v", "--verify", "-n") for r in rest)
+    elif sub == "branch":
+        if any(r in GIT_BRANCH_MUTATING or r.startswith("--set-upstream-to=") for r in rest):
+            write = True
+        elif any(r in GIT_BRANCH_LISTING or r.startswith(("--format", "--sort")) for r in rest):
+            write = False
+        else:
+            write = any(not r.startswith("-") for r in rest)
+    else:
+        write = False
+    return [d] + abs_args(rest) if write else []
+
+
+def console_writes(args):
+    i = first_positional(args)
+    if i is None:
+        return False
+    c = args[i]
+    return c.startswith(("doctrine:", "make:", "cache:", "importmap:")) or c == "assets:install"
+
+
+def in_place_flag(args):
+    for a in args:
+        if a == "-i" or a.startswith("--in-place"):
+            return True
+        if a.startswith("-") and not a.startswith("--") and "i" in a[1:]:
+            return True
+    return False
+
+
+def words_targets(words, cwd, depth):
+    """Cibles d'écriture d'une commande simple (sans séparateurs ni redirections)."""
+    while words and (words[0] in PREFIXES or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0])):
+        words = words[1:]
+    if not words:
+        return []
+    name, args = os.path.basename(words[0]), words[1:]
+
+    if name == "work":
+        return []
+    if name in SHELLS and "-c" in args:
+        i = args.index("-c")
+        return classify(args[i + 1], cwd, depth + 1) if i + 1 < len(args) else []
+    if name == "git":
+        return git_targets(args, cwd)
+    if name in FILE_WRITE:
+        return [cwd] + abs_args(args)
+    if name in ("sed", "perl") and in_place_flag(args):
+        return [cwd] + abs_args(args)
+    if name in ("composer", "composer.phar"):
+        i = first_positional(args)
+        return [cwd] if i is not None and args[i] in COMPOSER_WRITE else []
+    if name in ("npm", "yarn", "pnpm"):
+        i = first_positional(args)
+        if i is None:
+            return [cwd] if name == "yarn" else []
+        sub = args[i]
+        if sub in NODE_WRITE or (sub == "run" and args[i + 1:i + 2] == ["build"]) or (name == "yarn" and sub == "build"):
+            return [cwd]
+        return []
+    if name == "make":
+        return [cwd]
+    if name in ("phpunit", "pest", "simple-phpunit"):
+        return [cwd]
+    if name == "console":
+        return [cwd] if console_writes(args) else []
+    if name == "php" and args:
+        script = os.path.basename(args[0])
+        if script == "console":
+            return [cwd] if console_writes(args[1:]) else []
+        if script in ("phpunit", "pest", "simple-phpunit"):
+            return [cwd]
+        return []
+    if name == "docker" and args[:1] == ["compose"]:
+        return compose_targets(args[1:], cwd, depth)
+    if name == "docker-compose":
+        return compose_targets(args, cwd, depth)
+    return []
+
+
+def compose_targets(args, cwd, depth):
+    i = first_positional(args, COMPOSE_GLOBAL_VALUE_OPTS)
+    if i is None:
+        return []
+    sub, rest = args[i], args[i + 1:]
+    if sub in COMPOSE_WRITE:
+        return [cwd]
+    if sub in ("exec", "run"):
+        j = first_positional(rest, COMPOSE_EXEC_VALUE_OPTS)
+        if j is None:
+            return []
+        inner = rest[j + 1:]
+        return [cwd] if inner and words_targets(inner, cwd, depth + 1) else []
+    return []
+
+
+def classify(cmd, cwd, depth=0):
+    """Chemins touchés en écriture par une commande Bash (liste vide = lecture)."""
+    targets = []
+    if depth > 5 or not cmd:
+        return targets
+    for seg in segments(tokenize(cmd)):
+        for t in seg:
+            m = re.search(r"\$\((.+)\)", t) or re.search(r"`([^`]+)`", t)
+            if m and len(t) > 1:
+                targets += classify(m.group(1), cwd, depth + 1)
+        words = strip_redirections(seg, cwd, targets)
+        if words and words[0] == "cd":
+            cwd = resolve(words[1], cwd) if len(words) > 1 else os.path.expanduser("~")
+            continue
+        targets += words_targets(words, cwd, depth)
+    seen, out = set(), []
+    for t in targets:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
+# ── Décision ──────────────────────────────────────────────────────────────────
+
+def load_projects():
+    projects = []
+    with open(CONF, encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("|")
+            if len(parts) >= 5:
+                projects.append({"name": parts[0], "repo": parts[1].rstrip("/")})
+    return projects
+
+
+def project_for(path, projects):
+    best = None
+    for p in projects:
+        if (path + "/").startswith(p["repo"] + "/") and (best is None or len(p["repo"]) > len(best["repo"])):
+            best = p
+    return best
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+
+
+def is_ignored(repo, path):
+    if os.path.normpath(path) == repo:
+        return False
+    return git(repo, "check-ignore", "-q", path).returncode == 0
+
+
+def session_alive(sid):
+    if not sid:
+        return False
+    if sid.startswith("human:"):
+        return True
+    try:
+        names = os.listdir(SESSIONS_DIR)
+    except OSError:
+        return False
+    for n in names:
+        if not n.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(SESSIONS_DIR, n), encoding="utf-8") as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if d.get("sessionId") != sid:
+            continue
+        try:
+            os.kill(int(d.get("pid")), 0)
+            return True
+        except PermissionError:
+            return True
+        except (ProcessLookupError, ValueError, TypeError, OverflowError):
+            continue
+    return False
+
+
+def state_of(repo):
+    r = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if r.returncode != 0:
+        return None
+    try:
+        with open(os.path.join(r.stdout.strip(), "claude-work.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"state": "free", "pending_prs": []}
+
+
+def decide(p, session):
+    """Message de blocage, ou None si l'écriture est autorisée."""
+    st = state_of(p["repo"])
+    if st is None:
+        return None
+    name = p["name"]
+    if st.get("state") != "active":
+        return (f"⛔ work · {name} : aucun ticket démarré — écriture bloquée.\n"
+                f"Démarre le travail avec `work start <KEY>` (ou `work resume <KEY>`) depuis {p['repo']}.\n"
+                "Lecture, analyse et commandes non mutantes restent libres.")
+    ticket, branch, owner = st.get("ticket"), st.get("branch"), st.get("owner_session") or ""
+    if owner == session:
+        cur = git(p["repo"], "branch", "--show-current").stdout.strip()
+        if cur != branch:
+            return (f"⛔ work · {name} : la branche courante ({cur or 'HEAD détachée'}) n'est pas celle "
+                    f"du ticket {ticket} ({branch}). Repasse sur {branch} avant d'écrire.")
+        return None
+    since = st.get("started_at", "?")
+    if session_alive(owner):
+        return (f"⛔ work · {name} : écriture tenue par une autre session ({owner[:8]}) — ticket {ticket} "
+                f"sur {branch}, depuis {since}.\n"
+                "Cette session est en lecture seule sur ce projet : lecture, analyse et prod en lecture restent libres.")
+    return (f"⛔ work · {name} : le ticket {ticket} ({branch}) est tenu par une session terminée ({owner[:8]}).\n"
+            "Si Simon le demande, reprends-le avec `work takeover`.")
+
+
+def hook():
+    if os.environ.get("WORK_GUARD") == "off":
+        return 0
+    data = json.load(sys.stdin)
+    tool = data.get("tool_name") or ""
+    tool_input = data.get("tool_input") or {}
+    cwd = data.get("cwd") or os.getcwd()
+    session = data.get("session_id") or ""
+
+    if tool in WRITE_TOOLS:
+        path = tool_input.get("file_path") or tool_input.get("notebook_path")
+        targets = [resolve(path, cwd)] if path else []
+    elif tool == "Bash":
+        targets = classify(tool_input.get("command") or "", cwd)
+    else:
+        return 0
+    if not targets:
+        return 0
+
+    projects, seen = load_projects(), set()
+    for t in targets:
+        p = project_for(t, projects)
+        if p is None or p["repo"] in seen or is_ignored(p["repo"], t):
+            continue
+        seen.add(p["repo"])
+        msg = decide(p, session)
+        if msg:
+            sys.stderr.write(msg + "\n")
+            return 2
+    return 0
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--classify":
+        args = sys.argv[2:]
+        cwd = args[args.index("--cwd") + 1] if "--cwd" in args else os.getcwd()
+        print(json.dumps({"targets": classify(args[0], cwd)}))
+        return 0
+    try:
+        return hook()
+    except Exception:  # fail-open : une garde cassée ne doit jamais paralyser les sessions
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
