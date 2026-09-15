@@ -36,7 +36,7 @@ Quatre lots, livrés dans l'ordre, **une branche + une PR Infra par lot** :
 ## 3. Lot 1 — Démontage de `wt`
 
 ### 3.1 Prérequis manuel
-Les environnements `wt` encore enregistrés contiennent peut-être du travail. Au 2026-09-15 : `bifacto-doc-sa-org-funnel` a **5 fichiers non commités** (PortfolioController + test + 3 traductions). Ce travail est commité et poussé sur sa branche (action sortante → validation de Simon) **avant** toute exécution du démontage.
+Les environnements `wt` encore enregistrés contiennent peut-être du travail. Au 2026-09-15 : `bifacto-doc-sa-org-funnel` (branche `feature/sa-org-funnel`) a **5 fichiers non commités** (PortfolioController + test + 3 traductions) **et 8 commits jamais poussés**. Ce travail est commité et poussé sur sa branche (action sortante → validation de Simon) **avant** toute exécution du démontage.
 
 ### 3.2 `bin/wt-decommission`
 Script one-shot. **Simulation par défaut** ; `--apply` pour exécuter.
@@ -48,23 +48,27 @@ Script one-shot. **Simulation par défaut** ; `--apply` pour exécuter.
 - lignes `.mcp.json` dans les fichiers `.worktreeinclude` ;
 - hook `SessionStart` pointant sur `wt-session-hook` et skill `~/.claude/skills/worktree-env`.
 
-**Contrôle de sauvegarde** : pour chaque worktree secondaire, statut `SAUF` ou `À RISQUE` :
-- `À RISQUE` si `git status --porcelain` non vide, **ou** si des commits de la branche ne sont sur aucune branche distante (`git log --branches --not --remotes` limité à la branche) ;
-- `--apply` **refuse de tout faire** (exit 1, aucune suppression) tant qu'un worktree est `À RISQUE`, et liste les coupables.
+**Contrôle de sauvegarde** : pour chaque worktree secondaire, un statut :
+- `MANQUANT` : dossier disparu (git le marque `prunable`) → simple `prune` ;
+- `EN USAGE` : le `cwd` d'une session Claude vivante (`~/.claude/sessions/*.json`, pid vivant) est dans ce dossier — cas des worktrees `.claude/worktrees/bridge-*` créés par les sessions distantes ;
+- `À RISQUE` : `git status --porcelain` non vide, **ou** commits de `HEAD` absents de toute branche distante (`git rev-list --count HEAD --not --remotes`) ;
+- `SAUF` : sinon.
 
-**Retrait** (`--apply`, uniquement si tout est `SAUF`) :
-1. pour chaque env du registre : `docker compose down` (profils inclus, même logique que `wt destroy`), puis `DROP DATABASE` dans le conteneur enregistré ;
-2. `git worktree remove` puis `git worktree prune` dans chaque repo ;
-3. suppression de `~/wt/` (s'il est vide après l'étape 2 ; sinon arrêt et rapport) et de `~/.local/state/wt/` ;
-4. retrait de la ligne `.mcp.json` des `.worktreeinclude` (fichier supprimé s'il devient vide) ;
-5. `~/.claude/settings.json` : sauvegarde `settings.json.bak-<date>`, retrait via `jq` de l'entrée `SessionStart` wt-session-hook ;
-6. suppression du lien `~/.claude/skills/worktree-env`.
+Un dossier sous `~/wt/` qui n'est pas un worktree connu est `INCONNU`.
+`--apply` **refuse de tout faire** (exit 1, aucune suppression) tant qu'il existe un élément `À RISQUE`, `EN USAGE` ou `INCONNU`, et les liste.
+
+**Retrait** (`--apply`, sans élément bloquant) :
+1. pour chaque env du registre : `wt destroy <app> <slug> --yes` (réutilise la logique existante : `docker compose down` profils inclus, `DROP DATABASE`, retrait du worktree et du registre) ;
+2. `git worktree remove` (sans `--force`) des autres worktrees présents, suppression du dossier parent `.claude/worktrees` s'il devient vide, puis `git worktree prune` dans chaque repo ;
+3. suppression de `~/wt/` (qui doit être vide) et de `~/.local/state/wt/` ;
+4. suppression des `.worktreeinclude` **non versionnés** (tous le sont au 2026-09-15 : ils ne servaient qu'aux worktrees) et de leur ligne dans `.git/info/exclude` ; un `.worktreeinclude` versionné est laissé et signalé ;
+5. `~/.claude/settings.json` : sauvegarde `settings.json.bak-<date>` si le hook est présent, puis `bin/wt-hook-install --uninstall` (retire l'entrée `SessionStart` wt-session-hook et le lien `~/.claude/skills/worktree-env`).
 
 Chaque étape est idempotente : relancer le script après un échec partiel reprend là où il s'était arrêté.
 
 ### 3.3 Retrait du code (même PR, commit suivant l'exécution)
-Suppression de : `bin/wt`, `bin/wt-hook-install`, `bin/wt-session-hook`, `lib/` (fichiers wt), `etc/wt/`, `skills/worktree-env/`, tests bats associés, `docs/wt-README.md`, `docs/wt-hook-README.md`, puis `bin/wt-decommission` lui-même.
-Le dashboard actuel est **amputé a minima** pour rester fonctionnel jusqu'au lot 3 : retrait de la section worktrees, de `server/destroy.php`, de la route `POST /api/worktrees/*/destroy` et des lignes worktree du CSV.
+Suppression de : `bin/wt`, `bin/wt-hook-install`, `bin/wt-session-hook`, `bin/wt-decommission`, `lib/` (entièrement : tous ses fichiers relèvent de `wt`), `etc/wt/`, `skills/worktree-env/`, `tests/fixtures/` (utilisées uniquement par des tests `wt`), les tests bats propres à `wt` (moteur, hook, skill, destroy du dashboard, décommission), `docs/wt-README.md`, `docs/wt-hook-README.md`. Les specs et plans du 2026-09-05 restent comme historique.
+Le dashboard actuel est **amputé a minima** pour rester fonctionnel jusqu'au lot 3 : retrait de la section worktrees (collecteur `wt-metrics`, HTML, JS, CSS), de `server/destroy.php`, de la route `POST /api/worktrees/*/destroy` et des lignes worktree du CSV ; `docs/wt-dashboard-README.md` est mis à jour en conséquence.
 
 ## 4. Lot 2 — `work`, garde d'écriture, skill
 
