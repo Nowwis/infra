@@ -1,18 +1,6 @@
 # shellcheck shell=bash
 # work pr [--title T --body-file F] — pousse la branche, ouvre la PR, revient sur main.
 
-# Arrêt sauf si un ticket est actif, tenu par la session courante et checkouté.
-work_require_mine() {
-  local st="$1" owner branch
-  [ "$(jq -r .state <<<"$st")" = active ] || work_die "aucun ticket actif sur $WP_NAME (work start <KEY>)"
-  owner="$(jq -r .owner_session <<<"$st")"
-  [ "$owner" = "$(work_session_id)" ] \
-    || work_die "le ticket $(jq -r .ticket <<<"$st") est tenu par une autre session ($owner) : work takeover si elle est terminée"
-  branch="$(jq -r .branch <<<"$st")"
-  [ "$(work_current_branch)" = "$branch" ] \
-    || work_die "la branche courante ($(work_current_branch)) n'est pas celle du ticket ($branch)"
-}
-
 # URL web de création de MR GitLab, depuis l'URL brute d'origin (insteadOf non appliqué).
 work_gitlab_mr_url() { # branch base
   local url host path
@@ -61,15 +49,7 @@ _work_pr() { # title body_file
   fi
 
   git -C "$WP_REPO" checkout -q "$WP_MAIN" || work_die "retour sur $WP_MAIN impossible"
-  st="$(jq --arg t "$ticket" --arg b "$branch" --arg base "$base" --arg n "$number" --arg u "$url" --arg now "$(work_now)" '
-      .pending_prs = ((.pending_prs | map(select(.branch != $b)))
-        + [{ticket: $t, branch: $b, base: $base,
-            number: (if $n == "" then null else ($n | tonumber) end),
-            url: (if $u == "" then null else $u end),
-            opened_at: $now, parked: false}])
-      | .state = "free"
-      | del(.ticket, .branch, .base, .owner_session, .started_at)' <<<"$st")"
-  work_state_put "$st"
+  work_state_put "$(work_state_release "$st" "$number" "$url" false)"
   work_sync_bases
   work_say "✓ retour sur $WP_MAIN à jour ; $ticket en attente de merge."
 }

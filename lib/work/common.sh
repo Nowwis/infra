@@ -105,3 +105,28 @@ work_sync_bases() {
 work_pr_state() {
   ( cd "$WP_REPO" && gh pr view "$1" --json state --jq .state 2>/dev/null ) || true
 }
+
+# Arrêt sauf si un ticket est actif, tenu par la session courante et checkouté.
+work_require_mine() { # état JSON
+  local st="$1" owner branch
+  [ "$(jq -r .state <<<"$st")" = active ] || work_die "aucun ticket actif sur $WP_NAME (work start <KEY>)"
+  owner="$(jq -r .owner_session <<<"$st")"
+  [ "$owner" = "$(work_session_id)" ] \
+    || work_die "le ticket $(jq -r .ticket <<<"$st") est tenu par une autre session ($owner) : work takeover si elle est terminée"
+  branch="$(jq -r .branch <<<"$st")"
+  [ "$(work_current_branch)" = "$branch" ] \
+    || work_die "la branche courante ($(work_current_branch)) n'est pas celle du ticket ($branch)"
+}
+
+# État JSON où le ticket actif passe dans pending_prs ; le projet redevient libre.
+work_state_release() { # état numéro url parked(true|false) ; numéro/url vides → null
+  jq --arg n "$2" --arg u "$3" --argjson parked "$4" --arg now "$(work_now)" '
+    .branch as $b
+    | .pending_prs = ((.pending_prs | map(select(.branch != $b)))
+        + [{ticket: .ticket, branch: .branch, base: .base,
+            number: (if $n == "" then null else ($n | tonumber) end),
+            url: (if $u == "" then null else $u end),
+            opened_at: $now, parked: $parked}])
+    | .state = "free"
+    | del(.ticket, .branch, .base, .owner_session, .started_at)' <<<"$1"
+}
