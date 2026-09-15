@@ -177,7 +177,7 @@ Déclencheurs : « on démarre <KEY> », « ouvre la PR », « c'est mergé », 
 | `worktree.docker.test`, route/middleware Traefik `wt-dashboard*` | `console.docker.test`, `console*` |
 | `certs/wt-dashboard.htpasswd`, `~/.wt-dashboard-credential` | `certs/console.htpasswd`, `~/.console-credential` |
 
-La route Traefik NOWIA (actuellement non commitée) référence `wt-dashboard.htpasswd` : la référence est mise à jour dans la même opération. Bascule : 1 `docker restart infra_traefik`.
+Le renommage de la route Traefik (`dynamic_conf.local.yaml`) se fait **au déploiement, avec Simon**, pas dans la PR : ce fichier porte la route NOWIA non commitée, qui référence `wt-dashboard.htpasswd` et doit passer à `console.htpasswd` dans la même opération. Bascule : arrêt de `wt-dashboard`, route mise à jour, 1 `docker restart infra_traefik`, vérification 401 sans auth / 200 avec.
 
 ### 5.2 Architecture : le travail lourd hors de la page
 ```
@@ -195,10 +195,11 @@ Constat à l'origine : le collecteur actuel prend 4,5 s (21 s à froid, dont `do
 | `system` | 2 s | `/proc/meminfo`, `/proc/loadavg`, PSI `cpu`/`memory`/`io` |
 | `sessions` | 5 s | `~/.claude/sessions/*.json` (pid vivant uniquement) |
 | `projects` | 10 s | `projects.conf` + `claude-work.json` + git local (sans fetch) |
-| `prs` | 5 min | `gh pr view` pour chaque `pending_prs` GitHub |
+| `prs` | 5 min, en tâche de fond | `gh pr view` pour chaque `pending_prs` GitHub |
 | `docker` | 15 s | `docker stats --no-stream` + labels compose |
 | `diagnostics` | 15 s | calculs sur les sections ci-dessus + sources propres (§5.5) |
-| `disk` | 60 s | `df` ; `docker system df` toutes les 10 min |
+| `disk` | 60 s | `df` |
+| `docker_df` | 600 s, en tâche de fond | `docker system df` (≈ 11 s) |
 
 **API** : `GET /api/snapshot` (renvoie le fichier ; ajoute `stale: true` si une section a plus de 3 fois son âge de cadence) ; `GET /api/snapshot.csv` (CSV actuel adapté aux nouvelles sections, protection contre l'injection de formules conservée). Aucune route d'écriture.
 
@@ -223,13 +224,13 @@ Source : `~/.claude/sessions/*.json` dont le pid est vivant. Pour chaque session
 | PSI mémoire `some avg60` | > 10 | > 25 |
 | PSI io `some avg60` | > 20 | > 40 |
 | Disque (par point de montage) | > 85 % | > 95 % |
-| Processus tués par manque de mémoire (24 h, `journalctl -k`) | ≥ 1 | — |
+| Processus tués par manque de mémoire (hausse du compteur `oom_kill` de `/proc/vmstat` sur 24 h ; `journalctl -k` est interdit sans le groupe `adm`) | ≥ 1 | — |
 | Conteneur `unhealthy` ou redémarré depuis le dernier passage | ≥ 1 | redémarrages ≥ 3 en 15 min |
-| Unités systemd utilisateur en échec | ≥ 1 | — |
-| Serveur MCP local lancé en plusieurs exemplaires (même ligne de commande) | > 3 | > 10 |
+| Unités systemd utilisateur en échec (hors `init.scope`, toujours en échec sur l'hôte) | ≥ 1 | — |
+| Serveurs MCP orphelins : processus `mcp` hors de l'arbre de toute session vivante (un serveur par session est normal) | > 3 | > 10 |
 | Verrou tenu par une session morte | ≥ 1 | — |
 
-Une source indisponible (ex. `journalctl -k` sans droits) produit un diagnostic `warn` « source indisponible », jamais une erreur de collecte.
+Une source indisponible (ex. docker absent, section jamais collectée) produit un diagnostic `warn` « source indisponible », jamais une erreur de collecte.
 
 ### 5.6 UI
 Ordre : vitals (hero) → diagnostics non `ok` → Projets → Sessions → Docker → Disques. Conserve l'acquis de la refonte (recherche instantanée, repli mémorisé, grille responsive, thème clair/sombre). Aucune action d'écriture. Accès inchangé : Tailscale + basicauth.
