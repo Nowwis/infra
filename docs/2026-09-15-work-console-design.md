@@ -9,12 +9,14 @@ Les worktrees (`wt`) isolaient chaque ticket dans un checkout + une stack Docker
 Nouveau modèle : **un seul checkout et une seule stack par projet**. La concurrence entre sessions Claude (tmux, remote) ne se règle plus par isolation mais par un **verrou d'écriture** : une seule session écrit dans un projet à la fois ; toutes les autres peuvent lire, analyser la prod, ou écrire dans un *autre* projet.
 
 Workflow cible (validé) :
-1. pull de la base ;
-2. création de la branche ;
+1. pull de **main et develop, toujours** ;
+2. création de la branche : **feature tirée de develop, hotfix tirée de main** ;
 3. travail ;
-4. ouverture de la PR, puis **retour immédiat sur la base** ;
+4. ouverture de la PR, puis **retour immédiat sur main** ;
 5. Simon merge la PR ;
-6. Simon dit « c'est mergé » → pull de la base + suppression de la branche locale.
+6. *(facultatif)* Simon dit « c'est mergé » → pull de main et develop + suppression de la branche locale. Si Simon ne le dit pas, le ménage est fait au `work start` suivant.
+
+Au repos, un projet est donc **toujours sur main, arbre propre**.
 
 Le tout est complété par une **console** (ex-dashboard) en lecture seule : sessions lancées, ce qu'elles exécutent, état des projets, diagnostic du VPS.
 
@@ -67,8 +69,9 @@ Le dashboard actuel est **amputé a minima** pour rester fonctionnel jusqu'au lo
 ## 4. Lot 2 — `work`, garde d'écriture, skill
 
 ### 4.1 Configuration des projets : `etc/work/projects.conf`
-Format : `nom|repo|base_feature|base_hotfix|forge`
-- `base_feature` = `develop` si `origin/develop` existe, sinon `main` ; `base_hotfix` = `main` (ou `master` si c'est la branche par défaut du repo) ;
+Format : `nom|repo|main|develop|forge`
+- `main` = branche principale du repo (`main`, ou `master` si c'est son nom) : base des hotfix et **branche de repos** ;
+- `develop` = `develop` si `origin/develop` existe, sinon vide : base des features (repli sur `main` si vide) ;
 - `forge` = `github` ou `gitlab` (d'après l'URL `origin`).
 
 Rempli à l'implémentation d'après l'état réel des remotes. État relevé le 2026-09-15 : 15 repos applicatifs sous `~/Project/*/*` + `Infra` + `_nowia` ; forges GitHub sauf `stream.consotrust.com` (gitlab.agena3000.com) et `services-rest.bifacto.com` (gitlab.com) ; pas de `develop` sur `parisrental.com`, `hermes-webui`, `services-rest.bifacto.com`. Un repo absent de la liste n'est pas protégé par la garde.
@@ -97,13 +100,17 @@ L'identité de session est lue dans `CLAUDE_CODE_SESSION_ID` (exporté par Claud
 ### 4.3 CLI `bin/work`
 Toutes les commandes s'exécutent dans le repo du `cwd` (résolu par plus long préfixe dans `projects.conf`) ; erreur explicite sinon.
 
+**Synchro des bases** (utilisée par `start`, `pr`, `merged`, `park`) : `fetch origin` puis mise à jour en avance rapide **de main et de develop** — `pull --ff-only` pour la branche actuellement checkoutée, `fetch origin <b>:<b>` pour l'autre. Une divergence arrête la commande (exit ≠ 0, message).
+
+**Ménage automatique** (utilisé par `start`, rendant l'étape 6 facultative) : pour chaque entrée non `parked` de `pending_prs` sur GitHub dont `gh pr view` renvoie `MERGED`, suppression de la branche locale (`branch -D`) et retrait de `pending_prs`, avec une ligne de rapport.
+
 | Commande | Préconditions (sinon exit ≠ 0, rien n'est modifié) | Effet |
 |---|---|---|
-| `work start <KEY> [--hotfix] [--slug S]` | `free` ; arbre propre (fichiers ignorés exclus) ; branche inexistante en local et sur origin | `fetch` ; `checkout <base>` ; `pull --ff-only` ; `checkout -b feature/<KEY>-<slug>` (ou `hotfix/…`) ; état `active` au nom de la session. **Avertit** (sans bloquer) si `pending_prs` non vide : le nouveau travail ne contiendra pas ces PR. |
-| `work pr [--title T --body-file F]` | `active`, possédé par la session ; sur `branch` ; arbre propre | `push -u origin <branch>` ; si aucune PR n'existe pour la branche : GitHub → `gh pr create --base <base>` ; GitLab → affiche l'URL de création de MR. Puis `checkout <base>` ; `pull --ff-only` ; ticket déplacé dans `pending_prs` ; état `free`. |
-| `work merged [KEY]` | la PR visée est dans `pending_prs` (KEY facultatif s'il n'y en a qu'une) ; arbre propre | GitHub : `gh pr view <branch> --json state` doit valoir `MERGED`, sinon refus. GitLab (pas de CLI) : exige `--confirmed`. Puis, si l'état est `free` : `checkout <base>` + `pull --ff-only` (sinon simple `fetch`, la base sera pullée au prochain `start`) ; `branch -D <branch>` (forcé car les merges squash sont invisibles pour `-d`, sûr car le merge est vérifié) ; retrait de `pending_prs`. |
+| `work start <KEY> [--hotfix] [--slug S]` | `free` ; arbre propre (fichiers ignorés exclus) ; branche inexistante en local et sur origin | ménage automatique ; `checkout main` ; synchro des bases ; `checkout -b feature/<KEY>-<slug> develop` (ou `hotfix/<KEY>-<slug> main`) ; état `active` au nom de la session. **Avertit** (sans bloquer) s'il reste des `pending_prs` : le nouveau travail ne contiendra pas ces PR. |
+| `work pr [--title T --body-file F]` | `active`, possédé par la session ; sur `branch` ; arbre propre | `push -u origin <branch>` ; si aucune PR n'existe pour la branche : GitHub → `gh pr create --base <base>` (develop pour une feature, main pour un hotfix) ; GitLab → affiche l'URL de création de MR. Puis `checkout main` ; synchro des bases ; ticket déplacé dans `pending_prs` ; état `free`. |
+| `work merged [KEY]` | *(facultatif)* la PR visée est dans `pending_prs` (KEY facultatif s'il n'y en a qu'une) | GitHub : `gh pr view <branch> --json state` doit valoir `MERGED`, sinon refus. GitLab (pas de CLI) : exige `--confirmed`. Puis synchro des bases ; `branch -D <branch>` (forcé car les merges squash sont invisibles pour `-d`, sûr car le merge est vérifié) ; retrait de `pending_prs`. Ne change jamais la branche checkoutée. |
 | `work resume <KEY>` | `free` ; arbre propre ; KEY dans `pending_prs` | `fetch` ; `checkout <branch>` ; `pull --ff-only` si la branche distante existe ; état `active` au nom de la session ; retrait de `pending_prs`. Sert aux corrections après relecture et à la reprise d'un travail mis de côté. |
-| `work park` | `active`, possédé par la session | `add -A` ; `commit -m "wip: <KEY> parked"` (s'il y a des changements) ; `push -u` ; `checkout <base>` ; `pull --ff-only` ; ticket dans `pending_prs` avec `parked: true` ; état `free`. Sert au hotfix urgent pendant une feature. Jamais de `stash`. |
+| `work park` | `active`, possédé par la session | `add -A` ; `commit -m "wip: <KEY> parked"` (s'il y a des changements) ; `push -u` ; `checkout main` ; synchro des bases ; ticket dans `pending_prs` avec `parked: true` ; état `free`. Sert au hotfix urgent pendant une feature. Jamais de `stash`. |
 | `work adopt <KEY>` | `free` ; branche courante ≠ base | État `active` sur la branche courante au nom de la session, sans toucher git (migration des travaux existants). |
 | `work takeover` | `active` | Réattribue `owner_session` à la session courante. Affiche l'ancien propriétaire et s'il est encore vivant. Uniquement sur demande explicite de Simon. |
 | `work status [--all] [--json]` | — | État du projet courant (ou de tous) : état, ticket, branche, propriétaire (vivant/mort), PR en attente, fichiers modifiés, dérive (voir §5.3). |
@@ -152,7 +159,7 @@ Déclencheurs : « on démarre <KEY> », « ouvre la PR », « c'est mergé », 
 `~/.claude/skills/start-ticket` est supprimé une fois le skill `work` en place ; `.claude/gitflow.json` de GEL reste lu.
 
 ### 4.7 Migration des repos existants (fin de lot 2, avec Simon)
-`work status --all` liste les projets en dérive (modifiés ou hors base sans état). Pour chacun, décision de Simon au cas par cas : `work adopt <KEY>` (vrai ticket en cours), commit + PR, ou abandon des changements. État relevé le 2026-09-15 : `stream.consotrust.com` (feature, 6 fichiers), `direkto.fr` (feature, 24), `asteria.immo` (main, 8), `parisrental.com` (feature, 1), `auth.bifacto.com` (hotfix, 1), `bifacto.com` (hotfix, 1), `myprojekt.fr` (hotfix, 1), `uspiecesautos.com` (main, 1), `hermes-webui` (master, 2), `Infra` (main, 1 : route Traefik NOWIA non commitée).
+`work status --all` liste les projets en dérive (modifiés, ou hors de main, sans état `active`). Pour chacun, décision de Simon au cas par cas : `work adopt <KEY>` (vrai ticket en cours), commit + PR, ou abandon des changements. État relevé le 2026-09-15 : `stream.consotrust.com` (feature, 6 fichiers), `direkto.fr` (feature, 24), `asteria.immo` (main, 8), `parisrental.com` (feature, 1), `auth.bifacto.com` (hotfix, 1), `bifacto.com` (hotfix, 1), `myprojekt.fr` (hotfix, 1), `uspiecesautos.com` (main, 1), `hermes-webui` (master, 2), `Infra` (main, 1 : route Traefik NOWIA non commitée).
 
 ## 5. Lot 3 — Console v1 (lecture seule)
 
@@ -194,8 +201,8 @@ Constat à l'origine : le collecteur actuel prend 4,5 s (21 s à froid, dont `do
 ### 5.3 Vue Projets
 Une carte par projet de `projects.conf` : état (`libre` / `ticket en cours` / `N PR en attente`), ticket, branche, propriétaire (id court, session tmux, vivant/mort), fichiers modifiés, avance/retard sur origin (dernier fetch connu).
 **Dérives signalées** :
-- **« PR mergée, base pas resynchronisée »** : une entrée de `pending_prs` est `MERGED` côté GitHub → « dis “c'est mergé” » ;
-- **projet modifié ou hors base sans état `active`** (écriture hors workflow) ;
+- **branche locale mergée** (information, pas une alerte) : une entrée de `pending_prs` est `MERGED` côté GitHub → nettoyée au prochain `work start` ou par « c'est mergé » ;
+- **projet modifié, ou hors de main, sans état `active`** (écriture hors workflow) ;
 - **verrou tenu par une session morte**.
 
 ### 5.4 Vue Sessions
