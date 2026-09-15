@@ -124,3 +124,74 @@ add_wt() {
   run "$D" --bogus
   [ "$status" -ne 0 ]
 }
+
+@test "--apply refuse tout si un worktree est À RISQUE" {
+  make_repo Org/app
+  add_wt Org/app "$HOME/wt/app-dirty" feature/dirty
+  echo x > "$HOME/wt/app-dirty/n"
+  mkdir -p "$WT_STATE"
+  jq -n --arg p "$HOME/wt/app-dirty" '[{project:"app-dirty",app:"app",slug:"dirty",path:$p}]' > "$WT_STATE/registry.json"
+
+  run "$D" --apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refusé"* ]]
+  [ -d "$HOME/wt/app-dirty" ]
+  [ -f "$WT_STATE/registry.json" ]
+  [ ! -s "$CALLS" ]
+}
+
+@test "--apply refuse tout si ~/wt contient un dossier INCONNU" {
+  make_repo Org/app
+  add_wt Org/app "$WT_DECOM_ROOT/Org/app/.claude/worktrees/bridge-x" hotfix/x
+  mkdir -p "$HOME/wt/stray"; touch "$HOME/wt/stray/f"
+
+  run "$D" --apply
+  [ "$status" -eq 1 ]
+  [ -d "$WT_DECOM_ROOT/Org/app/.claude/worktrees/bridge-x" ]
+  [ -d "$HOME/wt/stray" ]
+  [ ! -s "$CALLS" ]
+}
+
+@test "--apply retire envs, worktrees, dossiers, .worktreeinclude et hook" {
+  make_repo Org/app
+  local app="$WT_DECOM_ROOT/Org/app"
+  add_wt Org/app "$HOME/wt/myapp-t1" feature/t1
+  mkdir -p "$WT_STATE"
+  jq -n --arg p "$HOME/wt/myapp-t1" '[{project:"myapp-t1",app:"myapp",slug:"t1",path:$p}]' > "$WT_STATE/registry.json"
+  add_wt Org/app "$app/.claude/worktrees/bridge-x" hotfix/x
+  add_wt Org/app "$BATS_TEST_TMPDIR/gone" feature/gone
+  rm -rf "$BATS_TEST_TMPDIR/gone"
+  printf '.mcp.json\n.env\n' > "$app/.worktreeinclude"
+  printf '.mcp.json\n.worktreeinclude\n' >> "$app/.git/info/exclude"
+  make_repo Org/tracked
+  printf '.mcp.json\n' > "$WT_DECOM_ROOT/Org/tracked/.worktreeinclude"
+  git -C "$WT_DECOM_ROOT/Org/tracked" add .worktreeinclude
+  git -C "$WT_DECOM_ROOT/Org/tracked" commit -qm include
+  echo '{"hooks":{"SessionStart":[{"matcher":"*","hooks":[{"type":"command","command":"/x/bin/wt-session-hook"}]}]}}' > "$WT_SETTINGS"
+
+  run "$D" --apply
+  [ "$status" -eq 0 ]
+  grep -qx 'wt destroy myapp t1 --yes' "$CALLS"
+  grep -qx 'hook-install --uninstall' "$CALLS"
+  [ ! -e "$app/.claude/worktrees" ]
+  [ "$(git -C "$app" worktree list | wc -l)" -eq 1 ]
+  [ ! -e "$HOME/wt" ]
+  [ ! -e "$WT_STATE" ]
+  [ ! -e "$app/.worktreeinclude" ]
+  run grep -q worktreeinclude "$app/.git/info/exclude"
+  [ "$status" -ne 0 ]
+  grep -qx '.mcp.json' "$app/.git/info/exclude"
+  [ -f "$WT_DECOM_ROOT/Org/tracked/.worktreeinclude" ]
+  ls "$WT_SETTINGS".bak-* >/dev/null
+}
+
+@test "--apply est idempotent" {
+  make_repo Org/app
+  add_wt Org/app "$WT_DECOM_ROOT/Org/app/.claude/worktrees/bridge-x" hotfix/x
+
+  run "$D" --apply
+  [ "$status" -eq 0 ]
+  run "$D" --apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Démontage terminé"* ]]
+}

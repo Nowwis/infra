@@ -123,14 +123,76 @@ inventory() {
   say "  skill worktree-env : $({ [ -L "$SKILL_LINK" ] || [ -e "$SKILL_LINK" ]; } && echo présent || echo absent)"
 }
 
+apply() {
+  local app slug repo path pr parent
+  [ "$BLOCKERS" -eq 0 ] || die "--apply refusé : $BLOCKERS élément(s) bloquant(s) (À RISQUE, EN USAGE ou INCONNU ci-dessus). Rien n'a été modifié."
+
+  say ""
+  say "== Retrait"
+  # 1. Environnements du registre : wt destroy porte déjà docker down (profils inclus) + DROP DATABASE.
+  if [ -f "$STATE/registry.json" ]; then
+    while IFS=$'\t' read -r app slug; do
+      [ -n "$app" ] || continue
+      say "  wt destroy $app $slug"
+      "$WT_BIN" destroy "$app" "$slug" --yes || die "wt destroy $app $slug a échoué ; corriger puis relancer --apply"
+    done < <(jq -r '.[] | [.app, .slug] | @tsv' "$STATE/registry.json")
+  fi
+
+  # 2. Autres worktrees encore présents (sans --force : git refuse un arbre sale), puis prune.
+  while IFS= read -r repo; do
+    while IFS=$'\t' read -r path pr; do
+      [ -n "$path" ] && [ "$pr" = 0 ] && [ -d "$path" ] || continue
+      say "  git worktree remove $path"
+      git -C "$repo" worktree remove "$path" || die "retrait impossible : $path"
+      parent="$(dirname "$path")"
+      case "$parent" in */.claude/worktrees) rmdir "$parent" 2>/dev/null || true ;; esac
+    done < <(secondary_worktrees "$repo")
+    git -C "$repo" worktree prune
+  done < <(repos)
+
+  # 3. Dossiers d'état.
+  if [ -d "$WT_DIR" ]; then
+    rmdir "$WT_DIR" || die "$WT_DIR n'est pas vide"
+    say "  rmdir $WT_DIR"
+  fi
+  if [ -d "$STATE" ]; then
+    rm -rf "$STATE"
+    say "  rm -rf $STATE"
+  fi
+
+  # 4. .worktreeinclude non versionnés et leur ligne d'exclusion.
+  while IFS= read -r repo; do
+    [ -f "$repo/.worktreeinclude" ] || continue
+    git -C "$repo" ls-files --error-unmatch .worktreeinclude >/dev/null 2>&1 && continue
+    rm -f "$repo/.worktreeinclude"
+    [ -f "$repo/.git/info/exclude" ] && sed -i '/^\/\{0,1\}\.worktreeinclude$/d' "$repo/.git/info/exclude"
+    say "  rm $repo/.worktreeinclude"
+  done < <(repos)
+
+  # 5. Hook SessionStart + lien du skill (wt-hook-install --uninstall est idempotent).
+  if hook_present; then
+    cp "$SETTINGS" "$SETTINGS.bak-$(date +%Y%m%d%H%M%S)"
+    say "  sauvegarde de $SETTINGS"
+  fi
+  "$HOOK_INSTALL" --uninstall || die "wt-hook-install --uninstall a échoué"
+
+  say "Démontage terminé."
+}
+
+APPLY=0
 case "${1:-}" in
   "") ;;
+  --apply) APPLY=1 ;;
   -h|--help) say "usage: wt-decommission [--apply]"; exit 0 ;;
   *) die "option inconnue : $1" ;;
 esac
 command -v jq >/dev/null || die "jq requis"
 
 inventory
-say ""
-[ "$BLOCKERS" -gt 0 ] && say "BLOQUANT : $BLOCKERS élément(s) — --apply refusera tant qu'ils ne sont pas traités."
-say "Simulation : rien n'a été modifié. Relancer avec --apply pour exécuter."
+if [ "$APPLY" = 1 ]; then
+  apply
+else
+  say ""
+  [ "$BLOCKERS" -gt 0 ] && say "BLOQUANT : $BLOCKERS élément(s) — --apply refusera tant qu'ils ne sont pas traités."
+  say "Simulation : rien n'a été modifié. Relancer avec --apply pour exécuter."
+fi
