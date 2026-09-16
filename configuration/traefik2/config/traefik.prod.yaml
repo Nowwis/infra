@@ -37,3 +37,17 @@ certificatesResolvers:
       storage: /letsencrypt/acme.json
       httpChallenge:
         entryPoint: web
+
+# Access log: real client IP behind Cloudflare (Cf-Connecting-Ip) + Referer + User-Agent, for traffic-source tracing.
+# Rotated by configuration/traefik2/rotate-logs.sh (cron); Traefik reopens the file on SIGUSR1.
+accessLog:
+  filePath: /logs/access.log
+  format: json
+  bufferingSize: 0
+  fields:
+    headers:
+      names:
+        Referer: keep
+        User-Agent: keep
+        Cf-Connecting-Ip: keep
+        X-Forwarded-For: keep
