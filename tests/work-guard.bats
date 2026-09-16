@@ -106,3 +106,26 @@ guard() {
   t1=$(date +%s%N)
   [ $(( (t1 - t0) / 1000000 )) -lt 300 ]
 }
+
+@test "un blocage est journalisé, une écriture autorisée ne l'est pas" {
+  export CONSOLE_STATE="$BATS_TEST_TMPDIR/state"
+  J="$CONSOLE_STATE/events-$(date -u +%Y-%m-%d).jsonl"
+
+  run guard Edit "{\"file_path\":\"$A/src/x.php\"}"
+  [ "$status" -eq 2 ]
+  [ -f "$J" ]
+  tail -n1 "$J" | jq -e '.event == "guard.block" and .project == "app" and .session == "sess-me"
+    and .tool == "Edit" and (.summary | test("aucun ticket"))' >/dev/null
+
+  (cd "$A" && work start GEL-1 >/dev/null)
+  run guard Edit "{\"file_path\":\"$A/src/x.php\"}"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$J")" -eq 1 ]
+}
+
+@test "le journal des blocages ne fait jamais échouer la garde" {
+  export CONSOLE_STATE=/proc/impossible/state
+  run guard Edit "{\"file_path\":\"$A/src/x.php\"}"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"aucun ticket démarré"* ]]
+}
