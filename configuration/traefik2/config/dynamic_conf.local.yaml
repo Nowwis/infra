@@ -3,24 +3,38 @@ tls:
     - certFile: /etc/certs/docker.localhost.pem
       keyFile: /etc/certs/docker.localhost-key.pem
 
-# wt dashboard — route de la console d'observabilité (worktree.docker.test).
-# Le service (php -S) est fourni hors compose par bin/wt-dash-install (systemd --user),
-# atteint via l'IP Tailscale de l'hôte. Le secret basic-auth n'est PAS ici : il est
-# dans un fichier htpasswd gitignored (certs/wt-dashboard.htpasswd, monté /etc/certs).
+# console dev — route de la console d'observabilité (console.docker.test).
+# Les services (php -S web + collecteur) sont fournis hors compose par bin/console-install
+# (systemd --user), atteints via l'IP Tailscale de l'hôte. Le secret basic-auth n'est PAS
+# ici : il est dans un fichier htpasswd gitignored (certs/console.htpasswd, monté /etc/certs).
 http:
   routers:
-    wt-dashboard:
-      rule: "Host(`worktree.docker.test`)"
+    console:
+      rule: "Host(`console.docker.test`)"
       entrypoints: [websecure]
-      service: wt-dashboard
-      middlewares: [wt-dashboard-auth]
+      service: console
+      middlewares: [console-auth]
+      tls: {}
+    nowia-app:
+      rule: "Host(`nowia.docker.test`)"
+      entrypoints: [websecure]
+      service: nowia-app
       tls: {}
   services:
-    wt-dashboard:
+    console:
       loadBalancer:
         servers:
           - url: "http://100.75.44.109:8899"
+    nowia-app:
+      loadBalancer:
+        servers:
+          - url: "http://100.75.44.109:8811"
   middlewares:
-    wt-dashboard-auth:
+    console-auth:
       basicAuth:
-        usersFile: "/etc/certs/wt-dashboard.htpasswd"
+        usersFile: "/etc/certs/console.htpasswd"
+    # Défini mais non référencé par le routeur nowia-app : NOWIA est aujourd'hui
+    # accessible sans authentification à qui est sur Tailscale.
+    nowia-app-auth:
+      basicAuth:
+        usersFile: "/etc/certs/console.htpasswd"
