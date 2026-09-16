@@ -26,3 +26,20 @@ setup() { setup_infra; P="$INFRA_ROOT/console/public"; }
 @test "aucune dépendance externe" {
   ! grep -qiE 'https?://[^"]+\.(js|css)' "$P/index.html"
 }
+
+@test "index.html : panneau Activité présent" {
+  grep -q 'id="activity"' "$P/index.html"
+  grep -qi 'activité' "$P/index.html"
+}
+
+@test "app.js : rend le flux d'activité et le statut des sessions" {
+  grep -q 'renderActivity' "$P/app.js"
+  grep -q "dataOf(snap, 'activity')" "$P/app.js"
+  grep -qE "executing|waiting|idle" "$P/app.js"
+  grep -q 'last_block' "$P/app.js"
+}
+
+@test "le flux d'activité reste en lecture seule" {
+  run grep -qiE 'innerHTML|method: *.POST' "$P/app.js"
+  [ "$status" -eq 1 ]
+}

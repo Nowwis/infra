@@ -6,6 +6,9 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 GUARD="$HERE/work-guard"
 SESSION="$HERE/work-session-hook"
+JOURNAL="$HERE/console-hook"
+# Les huit événements que le journal d'activité enregistre (docs §6).
+JOURNAL_EVENTS='["SessionStart","UserPromptSubmit","PreToolUse","PostToolUse","Notification","Stop","SubagentStop","SessionEnd"]'
 SKILL_SRC="$(cd "$HERE/.." && pwd)/skills/work"
 SETTINGS="${WORK_SETTINGS:-$HOME/.claude/settings.json}"
 SKILLS_DIR="${WORK_SKILLS_DIR:-$HOME/.claude/skills}"
@@ -19,15 +22,15 @@ jq -e . "$SETTINGS" >/dev/null 2>&1 || die "settings.json invalide : $SETTINGS (
 
 # settings.json sans nos commandes ni guard-branch-clean, groupes et événements vides retirés.
 strip() {
-  jq --arg g "$GUARD" --arg s "$SESSION" '
+  jq --arg g "$GUARD" --arg s "$SESSION" --arg j "$JOURNAL" --argjson events "$JOURNAL_EVENTS" '
     def clean(ev):
       if (.hooks // {}) | has(ev) then
-        .hooks[ev] |= (map(.hooks |= map(select(.command != $g and .command != $s
+        .hooks[ev] |= (map(.hooks |= map(select(.command != $g and .command != $s and .command != $j
                                                and ((.command // "") | test("guard-branch-clean") | not))))
                        | map(select(.hooks | length > 0)))
         | if (.hooks[ev] | length) == 0 then del(.hooks[ev]) else . end
       else . end;
-    clean("PreToolUse") | clean("SessionStart")
+    reduce (["PreToolUse", "SessionStart"] + $events)[] as $ev (.; clean($ev))
     | if has("hooks") and (.hooks | length) == 0 then del(.hooks) else . end' "$SETTINGS"
 }
 
@@ -49,10 +52,13 @@ fi
 [ $# -eq 0 ] || die "usage : work-hook-install [--uninstall]"
 
 backup
-strip | jq --arg g "$GUARD" --arg s "$SESSION" --arg m "$MATCHER" '
+strip | jq --arg g "$GUARD" --arg s "$SESSION" --arg j "$JOURNAL" --arg m "$MATCHER" \
+     --argjson events "$JOURNAL_EVENTS" '
   .hooks = (.hooks // {})
   | .hooks.PreToolUse = ((.hooks.PreToolUse // []) + [{matcher: $m, hooks: [{type: "command", command: $g, timeout: 10}]}])
-  | .hooks.SessionStart = ((.hooks.SessionStart // []) + [{matcher: "*", hooks: [{type: "command", command: $s, timeout: 10}]}])' \
+  | .hooks.SessionStart = ((.hooks.SessionStart // []) + [{matcher: "*", hooks: [{type: "command", command: $s, timeout: 10}]}])
+  | reduce $events[] as $ev (.;
+      .hooks[$ev] = ((.hooks[$ev] // []) + [{matcher: "*", hooks: [{type: "command", command: $j, timeout: 5}]}]))' \
   | replace_settings
 if [ ! -e "$SKILLS_DIR/work" ] && [ ! -L "$SKILLS_DIR/work" ]; then ln -s "$SKILL_SRC" "$SKILLS_DIR/work"; fi
-echo "work : garde d'écriture et rappel SessionStart installés dans $SETTINGS ; skill lié dans $SKILLS_DIR/work"
+echo "work : garde d'écriture, rappel SessionStart et journal d'activité installés dans $SETTINGS ; skill lié dans $SKILLS_DIR/work"

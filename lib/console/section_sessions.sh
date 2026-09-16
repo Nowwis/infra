@@ -24,7 +24,7 @@ _console_work_tickets() {
 }
 
 section_sessions() {
-  local procs sessions projects tickets
+  local procs sessions projects tickets events
   procs="$(ps -eo pid=,ppid=,rss=,args= 2>/dev/null \
     | awk '{pid=$1; ppid=$2; rss=$3; $1=$2=$3=""; sub(/^ +/, ""); printf "%s\t%s\t%s\t%s\n", pid, ppid, rss, $0}' \
     | jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t") |
@@ -33,9 +33,11 @@ section_sessions() {
   sessions="$(_console_sessions_files)"; [ -n "$sessions" ] || sessions='[]'
   projects="$(console_work_projects)"
   tickets="$(_console_work_tickets)"; [ -n "$tickets" ] || tickets='[]'
+  events="$(console_journal_events)"; [ -n "$events" ] || events='[]'
 
   jq -c -n --argjson procs "$procs" --argjson sessions "$sessions" --argjson projects "$projects" \
-     --argjson tickets "$tickets" --argjson now "$(date +%s)" --arg home "$HOME" '
+     --argjson tickets "$tickets" --argjson events "$events" \
+     --argjson now "$(date +%s)" --arg home "$HOME" '
     def descend($children; $root): [$root] + ((($children[$root | tostring]) // []) | map(descend($children; .)) | flatten);
 
     ($procs | map(.pid)) as $pids
@@ -47,7 +49,23 @@ section_sessions() {
         | descend($children; .pid) as $tree
         | ($procs | map(select(.pid as $p | ($tree | index($p)) != null))) as $tp
         | ($s.cwd // "") as $cwd
+        # Statut : dernier evenement de la session dans le journal (pas d apostrophe ici,
+        # le programme jq est entre guillemets simples).
+        | ($events | map(select(.session == $s.sessionId))) as $se
+        | ($se | last) as $last
+        | ($se | map(select(.event == "guard.block")) | last) as $block
         | {session_id: $s.sessionId, pid: $s.pid, name: ($s.name // null), kind: ($s.kind // null),
+           status: (if $last == null then "unknown"
+                    elif $last.event == "Notification" then "waiting"
+                    elif $last.event == "Stop" then "idle"
+                    elif $last.event == "PreToolUse" then "executing"
+                    else "working" end),
+           status_detail: (if $last == null then null
+                           elif ($last.summary // "") == "" then null
+                           else $last.summary end),
+           status_since_s: (if $last == null or ($last.ts // "") == "" then null
+                            else ($now - ($last.ts | fromdateiso8601)) end),
+           last_block: (if $block == null then null else ($block.summary // null) end),
            cwd: ($s.cwd // null),
            tmux: (if $s.tmux then ($s.tmux | split(":")[0]) else null end),
            started_at: ($s.startedAt // null),

@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# console-hook — journal d'activité des sessions Claude
+# (docs/2026-09-15-work-console-design.md §6).
+#
+# Une ligne JSON par événement dans $CONSOLE_STATE/events-<date UTC>.jsonl.
+# Le TEXTE DES PROMPTS N'EST JAMAIS ENREGISTRÉ ; les secrets sont masqués.
+# Toujours exit 0, rien sur stdout : un journal ne doit jamais bloquer un outil.
+#
+# Budget : < 15 ms. D'où deux processus seulement — lecture par redirection bash,
+# puis un unique jq qui résout le projet, masque, tronque et compose la ligne.
+set +e
+{
+  # Aucun sous-shell ici : sur un hook appelé à chaque outil, chaque fork (readlink, cd…)
+  # coûte quelques millisecondes. L'expansion de paramètre suffit, le hook étant déclaré
+  # par chemin absolu dans settings.json.
+  : "${CONSOLE_STATE:=$HOME/.local/state/console}"
+  : "${WORK_CONF:=${BASH_SOURCE[0]%/*}/../etc/work/projects.conf}"
+  [ -f "$WORK_CONF" ] || WORK_CONF=/dev/null
+
+  IN="$(</dev/stdin)"
+  [ -n "$IN" ] || exit 0
+
+  LINE="$(jq -c --rawfile conf "$WORK_CONF" '
+    def clip: if length > 300 then .[0:300] else . end;
+    def redact:
+      gsub("(?i)bearer\\s+[^\\s\"]+"; "Bearer ***")
+      | gsub("://[^/@\\s]+@"; "://***@")
+      | gsub("(?i)(?<k>password|passwd|secret|token|api[_-]?key)\\s*[=:]\\s*[^\\s\"]+"; .k + "=***")
+      | gsub("[A-Za-z0-9+=_-]{32,}"; "***");
+
+    . as $in
+    | ($in.cwd // "") as $cwd
+    | ($conf | split("\n")
+       | map(select(length > 0 and (startswith("#") | not)) | split("|"))
+       | map(select(length >= 5 and (.[1] as $repo | ($cwd + "/") | startswith($repo + "/"))))
+       | sort_by(.[1] | length) | last) as $match
+    | ($in.tool_name // "") as $tool
+    | ($in.hook_event_name // "") as $event
+    | {ts: (now | todate),
+       event: $event,
+       session: ($in.session_id // null),
+       cwd: (if $cwd == "" then null else $cwd end),
+       project: (if $match then $match[0] else null end),
+       tool: (if $tool == "" then null else $tool end),
+       tool_use_id: ($in.tool_use_id // null),
+       summary: ((if $event == "UserPromptSubmit" then ""
+                  elif $event == "Notification" then ($in.message // "")
+                  elif $tool == "Bash" then ($in.tool_input.command // "")
+                  else (($in.tool_input.file_path // $in.tool_input.notebook_path) // "") end)
+                 | redact | clip),
+       result: (if ($in | has("tool_response"))
+                then (if ($in.tool_response.is_error == true) then "error" else "ok" end)
+                else null end)}' <<<"$IN" 2>/dev/null)"
+  [ -n "$LINE" ] || exit 0
+
+  # %()T est une primitive bash : pas de fork pour la date du fichier.
+  TZ=UTC printf -v DAY '%(%Y-%m-%d)T' -1
+  mkdir -p "$CONSOLE_STATE"
+  # Une seule écriture d'une ligne < 4 Ko : atomique, jamais de lecture-modification-écriture.
+  printf '%s\n' "$LINE" >> "$CONSOLE_STATE/events-$DAY.jsonl"
+  exit 0
+} 2>/dev/null

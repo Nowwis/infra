@@ -8,7 +8,7 @@
 CONSOLE_SECTIONS_DIR="$CONSOLE_STATE/sections"
 
 # section:cadence (secondes). Les sections lentes tournent en tâche de fond.
-CONSOLE_CADENCES="system:2 sessions:5 projects:10 docker:15 diagnostics:15 disk:60 prs:300 docker_df:600"
+CONSOLE_CADENCES="system:2 sessions:5 activity:5 projects:10 docker:15 diagnostics:15 disk:60 prs:300 docker_df:600"
 CONSOLE_BACKGROUND="prs docker_df"
 
 console_die() { printf 'console-collector : %s\n' "$*" >&2; exit 1; }
@@ -39,6 +39,36 @@ console_work_projects() {
   awk -F'|' '!/^#/ && NF >= 5 {printf "%s\t%s\t%s\n", $1, $2, $5}' "$conf" \
     | jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t")
         | {name: .[0], repo: .[1], forge: .[2]})'
+}
+
+# Journaux d'activité exploités : la veille puis aujourd'hui (une session à cheval sur minuit
+# reste lisible). Utilisés par les sections activity et sessions.
+console_journal_files() {
+  printf '%s\n%s\n' \
+    "$CONSOLE_STATE/events-$(date -u -d '-1 day' +%Y-%m-%d).jsonl" \
+    "$CONSOLE_STATE/events-$(date -u +%Y-%m-%d).jsonl"
+}
+
+# Rétention 7 jours. La date vient du NOM du fichier, pas de sa date de modification :
+# un vieux journal réécrit aujourd'hui doit tout de même partir.
+console_journal_purge() {
+  local cutoff f day
+  cutoff="$(date -u -d '-7 days' +%Y-%m-%d)"
+  for f in "$CONSOLE_STATE"/events-*.jsonl; do
+    [ -f "$f" ] || continue
+    day="${f##*/events-}"; day="${day%.jsonl}"
+    [[ "$day" < "$cutoff" ]] && rm -f "$f"
+  done
+  return 0
+}
+
+# Événements des journaux exploités, triés du plus ancien au plus récent.
+console_journal_events() {
+  local f files=()
+  while IFS= read -r f; do [ -f "$f" ] && files+=("$f"); done < <(console_journal_files)
+  if [ "${#files[@]}" -eq 0 ]; then printf '[]'; return 0; fi
+  cat "${files[@]}" 2>/dev/null \
+    | jq -s -c 'map(select(type == "object")) | sort_by(.ts // "")' 2>/dev/null
 }
 
 console_write_atomic() { # fichier (contenu sur stdin)

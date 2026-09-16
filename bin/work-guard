@@ -14,6 +14,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 CONF = os.environ.get("WORK_CONF") or os.path.join(ROOT, "etc/work/projects.conf")
@@ -354,6 +355,31 @@ def decide(p, session):
             "Si Simon le demande, reprends-le avec `work takeover`.")
 
 
+def journal_block(data, project, message):
+    """Trace le blocage dans le journal d'activité (même format que bin/console-hook).
+    Silencieux en cas d'échec : un journal cassé ne doit pas changer la décision."""
+    try:
+        state = os.environ.get("CONSOLE_STATE") or os.path.expanduser("~/.local/state/console")
+        os.makedirs(state, exist_ok=True)
+        now = time.gmtime()
+        line = json.dumps({
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", now),
+            "event": "guard.block",
+            "session": data.get("session_id"),
+            "cwd": data.get("cwd"),
+            "project": project,
+            "tool": data.get("tool_name"),
+            "tool_use_id": data.get("tool_use_id"),
+            "summary": message.split("\n")[0][:300],
+            "result": None,
+        }, ensure_ascii=False)
+        with open(os.path.join(state, "events-%s.jsonl" % time.strftime("%Y-%m-%d", now)),
+                  "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except Exception:
+        pass
+
+
 def hook():
     if os.environ.get("WORK_GUARD") == "off":
         return 0
@@ -381,6 +407,7 @@ def hook():
         seen.add(p["repo"])
         msg = decide(p, session)
         if msg:
+            journal_block(data, p["name"], msg)
             sys.stderr.write(msg + "\n")
             return 2
     return 0
