@@ -5,7 +5,9 @@
 
 _work_sync_is_base() { [ "$1" = "$WP_MAIN" ] || { [ -n "$WP_DEVELOP" ] && [ "$1" = "$WP_DEVELOP" ]; }; }
 
-_work_sync_tidy() { # branche courante → affiche la nouvelle branche courante
+# Range la branche courante si sa PR est mergée. Le résultat passe par WORK_SYNC_BRANCH :
+# la sortie standard porte les messages destinés à l'utilisateur, pas des valeurs de retour.
+_work_sync_tidy() { # branche courante
   local cur="$1" st pr
   st="$(work_state_get)"
   if [ "$(jq -r .state <<<"$st")" = active ]; then
@@ -30,7 +32,7 @@ _work_sync_tidy() { # branche courante → affiche la nouvelle branche courante
       work_warn "$WP_NAME : branche $cur conservée (PR ${pr:-absente})"
     fi
   fi
-  printf '%s' "$cur"
+  WORK_SYNC_BRANCH="$cur"
 }
 
 _work_sync() { # tidy(0|1)
@@ -38,7 +40,9 @@ _work_sync() { # tidy(0|1)
   local -a names=() befores=()
   cur="$(work_current_branch)"
 
-  [ "$tidy" = 1 ] && cur="$(_work_sync_tidy "$cur")"
+  WORK_SYNC_BRANCH="$cur"
+  [ "$tidy" = 1 ] && _work_sync_tidy "$cur"
+  cur="$WORK_SYNC_BRANCH"
 
   if _work_sync_is_base "$cur" && work_has_tracked_changes; then
     work_die "fichiers suivis modifiés sur $WP_NAME ($(work_tracked_count)) : rien n'a été synchronisé"

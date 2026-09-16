@@ -156,3 +156,17 @@ commit_work() { echo "$1" > "$1"; git add "$1"; git commit -qm "$1"; }
   [ -f m1 ]
   [[ "$output" == *main* ]]
 }
+
+@test "sync --tidy : le rapport final reste lisible" {
+  make_project app
+  cd "$PROJECTS/app"
+  git checkout -q -b feature/GEL-6 develop
+  commit_work a.txt
+  git push -q -u origin feature/GEL-6
+  gh_set feature/GEL-6 MERGED 6
+
+  run work sync --tidy
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"(branche courante : main)"* ]]
+  [[ "$output" != *"courante : ✓"* ]]
+}
