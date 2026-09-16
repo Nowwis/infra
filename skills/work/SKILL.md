@@ -35,6 +35,10 @@ dossier du projet. Une garde (hook PreToolUse) bloque toute écriture hors ticke
 ## Autres commandes
 
 - `work status` / `work status --all` — état du projet ou de tous (« état des projets »).
+- `work sync [--tidy]` — met `main` et `develop` à jour sans démarrer de ticket (« mets à jour les
+  bases »). Avec `--tidy`, si la branche courante n'est pas une base et que sa PR est mergée, le
+  projet revient sur `main` et la branche locale est supprimée. Ne touche jamais à une branche qui
+  porte un ticket actif ni à un arbre de travail non propre.
 - `work resume <KEY>` — reprendre une branche en attente (retours de relecture, ticket mis de côté).
   Après les corrections : `work pr` (la PR existante est réutilisée).
 - `work park` — hotfix urgent pendant une feature : commit `wip` + push (**validation de

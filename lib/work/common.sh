@@ -79,6 +79,11 @@ work_current_branch() { git -C "$WP_REPO" branch --show-current 2>/dev/null; }
 work_is_clean()       { [ -z "$(git -C "$WP_REPO" status --porcelain 2>/dev/null)" ]; }
 work_dirty_count()    { git -C "$WP_REPO" status --porcelain 2>/dev/null | grep -c .; }
 
+# Modifications de fichiers SUIVIS seulement : un fichier non suivi n'empêche ni un
+# `pull --ff-only` ni un `checkout`, donc il ne doit pas bloquer une synchro de bases.
+work_has_tracked_changes() { [ -n "$(git -C "$WP_REPO" status --porcelain --untracked-files=no 2>/dev/null)" ]; }
+work_tracked_count()       { git -C "$WP_REPO" status --porcelain --untracked-files=no 2>/dev/null | grep -c .; }
+
 work_check_name() {
   [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] || work_die "nom invalide : '$1' (autorisé : lettres, chiffres, . _ -)"
 }
@@ -86,7 +91,9 @@ work_check_name() {
 # fetch puis avance rapide de main et develop : pull pour la branche checkoutée, fetch b:b pour l'autre.
 work_sync_bases() {
   local cur b
-  git -C "$WP_REPO" fetch -q origin || work_die "fetch origin impossible ($WP_NAME)"
+  # --prune : sans lui, une base supprimée sur origin garde une référence locale obsolète
+  # et la mise à jour échoue sur « couldn't find remote ref ».
+  git -C "$WP_REPO" fetch -q --prune origin || work_die "fetch origin impossible ($WP_NAME)"
   cur="$(work_current_branch)"
   for b in "$WP_MAIN" "$WP_DEVELOP"; do
     [ -n "$b" ] || continue
