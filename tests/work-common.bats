@@ -89,18 +89,23 @@ setup() {
   echo "$output" | jq -e '.name=="app" and .state=="free" and .dirty==0 and .current_branch=="main" and (.drift|length)==0' >/dev/null
 }
 
-@test "work status : dérive hors-workflow (fichier modifié, puis branche autre que main)" {
+@test "work status : un fichier non suivi n'est pas une dérive, un fichier suivi modifié oui" {
   make_project app
   cd "$PROJECTS/app"
-  echo x > new.txt
+  echo nouveau > untracked.txt
 
   run work status --json
-  echo "$output" | jq -e '.dirty==1 and .drift==["hors-workflow"]' >/dev/null
+  echo "$output" | jq -e '.dirty == 0 and .untracked == 1 and .drift == []' >/dev/null
 
-  rm new.txt
+  echo modifié >> README
+  run work status --json
+  echo "$output" | jq -e '.dirty == 1 and .drift == ["hors-workflow"]' >/dev/null
+
+  git checkout -q -- README
+  rm untracked.txt
   git checkout -q develop
   run work status --json
-  echo "$output" | jq -e '.current_branch=="develop" and .drift==["hors-workflow"]' >/dev/null
+  echo "$output" | jq -e '.current_branch == "develop" and .drift == ["hors-workflow"]' >/dev/null
 }
 
 @test "work status : verrou tenu par une session morte" {

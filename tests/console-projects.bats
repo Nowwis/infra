@@ -43,7 +43,7 @@ commit_work() { echo "$1" > "$1"; git add "$1"; git commit -qm "$1"; }
   make_project app
   cd "$PROJECTS/app"
   work start GEL-2 >/dev/null
-  echo x > dirty.txt
+  echo modifié >> README
 
   run "$C" once projects
   echo "$output" | jq -e '.data[0].state == "active" and .data[0].ticket == "GEL-2"

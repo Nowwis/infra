@@ -19,6 +19,9 @@ dossier du projet. Une garde (hook PreToolUse) bloque toute écriture hors ticke
      tiré du résumé, puis **faire confirmer** par Simon.
    - `work start <KEY> [--hotfix] [--slug <slug>]` : pull de main et develop, branche
      `feature/<KEY>-<slug>` depuis develop ou `hotfix/<KEY>-<slug>` depuis main.
+   - Si le projet a déjà des modifications en cours qu'il faut emporter sur la nouvelle branche :
+     `work start <KEY> --keep-changes`. Sans cette option, un fichier suivi modifié bloque le
+     démarrage (les fichiers jamais ajoutés, eux, n'ont jamais bloqué).
 2. **Travailler** sur la branche : commits réguliers, messages en anglais.
 3. **Ouvrir la PR** — « ouvre la PR »
    - Rédiger titre et description (anglais, **aucune mention de Claude, d'une IA ni de

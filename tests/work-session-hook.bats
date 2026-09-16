@@ -45,7 +45,7 @@ ctx() { echo "$output" | jq -r '.hookSpecificOutput.additionalContext'; }
 
 @test "PR en attente et dérive hors workflow signalées" {
   echo '{"state":"free","pending_prs":[{"ticket":"GEL-0","branch":"feature/GEL-0","base":"develop","number":3,"url":"https://github.com/o/r/pull/3","parked":false}]}' > "$A/.git/claude-work.json"
-  echo x > "$A/new.txt"
+  echo modifié >> "$A/README"
   run hook_in "$A"
   [ "$status" -eq 0 ]
   [[ "$(ctx)" == *"PR en attente"*"GEL-0"* ]]

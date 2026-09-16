@@ -150,3 +150,41 @@ setup() { setup_work; }
   [ "$(cat "$BATS_TEST_TMPDIR/r1" "$BATS_TEST_TMPDIR/r2" | grep -cx 0)" -eq 1 ]
   state_of app | jq -e '.state=="active"' >/dev/null
 }
+
+@test "start --keep-changes emporte les modifications en cours sur la nouvelle branche" {
+  make_project app
+  cd "$PROJECTS/app"
+  echo modifié >> README
+  echo nouveau > untracked.txt
+
+  run work start GEL-5 --keep-changes
+  [ "$status" -eq 0 ]
+  [ "$(git branch --show-current)" = feature/GEL-5 ]
+  grep -q modifié README
+  [ -f untracked.txt ]
+  state_of app | jq -e '.state == "active" and .ticket == "GEL-5"' >/dev/null
+}
+
+@test "start --keep-changes refuse si les modifications empêchent le changement de base" {
+  make_project app
+  cd "$PROJECTS/app"
+  remote_commit app develop conflit.txt
+  echo local > conflit.txt
+
+  run work start GEL-6 --keep-changes
+  [ "$status" -ne 0 ]
+  [ "$(git branch --show-current)" = main ]
+  [ "$(cat conflit.txt)" = local ]
+  [ "$(jq -r .state .git/claude-work.json 2>/dev/null || echo free)" = free ]
+}
+
+@test "start sans --keep-changes refuse toujours un fichier suivi modifié" {
+  make_project app
+  cd "$PROJECTS/app"
+  echo modifié >> README
+
+  run work start GEL-7
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"arbre"* ]]
+  [ "$(git branch --show-current)" = main ]
+}

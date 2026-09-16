@@ -9,7 +9,8 @@ source "$WORK_ROOT/lib/work/common.sh"
 usage() {
   cat >&2 <<'EOF'
 usage: work <commande> [options]
-  start <KEY> [--hotfix] [--slug S]   démarre un ticket depuis main/develop à jour
+  start <KEY> [--hotfix] [--slug S] [--keep-changes]
+                                      démarre un ticket depuis main/develop à jour
   pr [--title T --body-file F]        pousse, ouvre la PR, revient sur main
   merged [KEY] [--confirmed]          nettoie une PR mergée (facultatif)
   resume <KEY>                        reprend une branche en attente

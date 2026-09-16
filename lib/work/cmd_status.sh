@@ -3,21 +3,26 @@
 
 # Objet JSON d'état du projet courant (WP_*).
 work_status_json() {
-  local st cur dirty me owner alive=false
+  local st cur dirty untracked me owner alive=false
   st="$(work_state_get)"
   cur="$(work_current_branch)"
-  dirty="$(work_dirty_count)"
+  # `dirty` ne compte que les fichiers SUIVIS : un fichier jamais ajouté n'empêche ni un pull
+  # ni un changement de branche, ce n'est donc pas une dérive du workflow.
+  dirty="$(work_tracked_count)"
+  untracked="$(( $(work_dirty_count) - dirty ))"
   me="$(work_session_id)"
   owner="$(jq -r '.owner_session // empty' <<<"$st")"
   [ -n "$owner" ] && work_session_alive "$owner" && alive=true
   jq -n --argjson st "$st" --arg name "$WP_NAME" --arg repo "$WP_REPO" --arg main "$WP_MAIN" \
-        --arg cur "$cur" --argjson dirty "${dirty:-0}" --arg me "$me" --argjson alive "$alive" '
+        --arg cur "$cur" --argjson dirty "${dirty:-0}" --argjson untracked "${untracked:-0}" \
+        --arg me "$me" --argjson alive "$alive" '
     ($st.state // "free") as $state
     | {name: $name, repo: $repo, state: $state,
        ticket: ($st.ticket // null), branch: ($st.branch // null),
        owner: ($st.owner_session // null), owner_alive: $alive,
        is_me: (($st.owner_session // "") == $me),
-       current_branch: $cur, dirty: $dirty, pending_prs: ($st.pending_prs // []),
+       current_branch: $cur, dirty: $dirty, untracked: $untracked,
+       pending_prs: ($st.pending_prs // []),
        drift: [
          (if $state == "free" and ($dirty > 0 or $cur != $main) then "hors-workflow" else empty end),
          (if $state == "active" and ($alive | not) then "verrou-orphelin" else empty end)

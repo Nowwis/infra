@@ -18,13 +18,17 @@ work_janitor() {
   jq -c --argjson k "$keep" '.pending_prs = $k' <<<"$st"
 }
 
-_work_start() { # key slug hotfix
-  local key="$1" slug="$2" hotfix="$3" st base branch pending
+_work_start() { # key slug hotfix keep_changes
+  local key="$1" slug="$2" hotfix="$3" keep="${4:-0}" st base branch pending
   st="$(work_state_get)"
   if [ "$(jq -r .state <<<"$st")" = active ]; then
     work_die "un ticket est déjà actif sur $WP_NAME : $(jq -r .ticket <<<"$st") ($(jq -r .branch <<<"$st")). Termine-le (work pr ou work park) avant d'en démarrer un autre."
   fi
-  work_is_clean || work_die "arbre de travail non propre sur $WP_NAME ($(work_dirty_count) fichier(s)) : commit, ou demande à Simon quoi en faire."
+  # --keep-changes : les modifications en cours partent avec la nouvelle branche. git refuse
+  # de lui-même le changement de base si elles devaient être écrasées.
+  if [ "$keep" != 1 ] && ! work_is_clean; then
+    work_die "arbre de travail non propre sur $WP_NAME ($(work_dirty_count) fichier(s)) : commit, ou relance avec --keep-changes pour emporter ces modifications sur la nouvelle branche."
+  fi
 
   if [ "$hotfix" = 1 ]; then
     base="$WP_MAIN"; branch="hotfix/$key"
@@ -55,10 +59,11 @@ _work_start() { # key slug hotfix
 }
 
 cmd_start() {
-  local key="" slug="" hotfix=0
+  local key="" slug="" hotfix=0 keep=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --hotfix) hotfix=1 ;;
+      --keep-changes) keep=1 ;;
       --slug) slug="${2:-}"; shift ;;
       -*) work_die "option inconnue : $1" ;;
       *) if [ -z "$key" ]; then key="$1"; else work_die "argument en trop : $1"; fi ;;
@@ -69,5 +74,5 @@ cmd_start() {
   work_check_name "$key"
   [ -z "$slug" ] || work_check_name "$slug"
   work_project_for_path "$PWD" || work_die "hors projet : $PWD n'appartient à aucun projet de $WORK_CONF"
-  work_locked _work_start "$key" "$slug" "$hotfix"
+  work_locked _work_start "$key" "$slug" "$hotfix" "$keep"
 }
