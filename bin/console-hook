@@ -17,7 +17,10 @@ set +e
   : "${WORK_CONF:=${BASH_SOURCE[0]%/*}/../etc/work/projects.conf}"
   [ -f "$WORK_CONF" ] || WORK_CONF=/dev/null
 
-  IN="$(</dev/stdin)"
+  # `cat` et non `$(</dev/stdin)` : la redirection suppose de pouvoir rouvrir le descripteur 0,
+  # ce qui échoue selon la façon dont l'appelant fournit la charge utile (tube déjà consommé,
+  # socket). `cat` lit simplement jusqu'à la fin de l'entrée.
+  IN="$(cat)"
   [ -n "$IN" ] || exit 0
 
   LINE="$(jq -c --rawfile conf "$WORK_CONF" '
