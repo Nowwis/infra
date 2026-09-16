@@ -1,124 +1,119 @@
 load helpers
+
 setup() {
   setup_infra
-  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
-  printf '#!/bin/bash\necho "{\\"system\\":{},\\"disk\\":[],\\"docker\\":[],\\"worktrees\\":[],\\"sessions\\":[]}"\n' > "$BIN/wt-metrics"; chmod +x "$BIN/wt-metrics"
-  export WT_METRICS_BIN="$BIN/wt-metrics" WT_DASH_CACHE="$BATS_TEST_TMPDIR/cache.json"
+  export CONSOLE_SNAPSHOT="$BATS_TEST_TMPDIR/snapshot.json"
   command -v php >/dev/null || skip "php not installed"
 }
 
-@test "metrics endpoint returns valid JSON with sections" {
-  run php -r 'require getenv("INFRA_ROOT")."/console/server/api.php"; echo wt_api_metrics();'
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e 'has("system") and has("sessions")' >/dev/null
+# snap [âge en secondes] [nom de conteneur]
+snap() {
+  jq -n --argjson t "$(( $(date +%s) - ${1:-0} ))" --arg cname "${2:-app-php-1}" '{
+    generated_at: $t,
+    sections: {
+      system: {collected_at: $t, cadence: 2, data: {mem_total_kb: 16000000, mem_avail_kb: 8000000,
+        swap_total_kb: 8000000, swap_used_kb: 0, load1: 1.5, ncpu: 4,
+        psi: {cpu_some_avg10: 1, mem_some_avg60: 0, mem_full_avg60: 0, io_some_avg60: 0}, oom_kill_total: 27}},
+      disk: {collected_at: $t, cadence: 60, data: [{mount: "/", size: 100, used: 50, avail: 50, use_pct: 50}]},
+      docker: {collected_at: $t, cadence: 15, data: [{name: $cname, project: "app", state: "running",
+        cpu_pct: "3.50%", mem_used: "120MiB", restarts: 0, health: null}]},
+      sessions: {collected_at: $t, cadence: 5, data: {items: [{session_id: "s1", pid: 1, project: "app",
+        tmux: "app", rss_kb: 1000, mcp: [], ticket: "GEL-1", name: "app-x", age_s: 60, system: false}], mcp_orphans: []}},
+      projects: {collected_at: $t, cadence: 10, data: [{name: "app", state: "free", dirty: 0, drift: [], pending_prs: []}]},
+      diagnostics: {collected_at: $t, cadence: 15, data: [{id: "ram", level: "warn", title: "Mémoire faible",
+        detail: "12 % disponibles", action: "Fermer des sessions"}]}
+    }}' > "$CONSOLE_SNAPSHOT"
 }
 
-@test "csv endpoint returns CSV header" {
-  run php -r 'require getenv("INFRA_ROOT")."/console/server/api.php"; echo wt_api_csv();'
-  [[ "$output" == *","* ]]
+api() { php -r "require getenv('INFRA_ROOT').'/console/server/api.php'; echo $1;"; }
+
+@test "snapshot : sections servies, fraîcheur calculée" {
+  snap
+  run api 'console_api_snapshot()'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '(.sections | keys | length) == 6
+    and .sections.system.stale == false and .sections.diagnostics.data[0].id == "ram"
+    and (.missing | not)' >/dev/null
 }
 
-@test "metrics endpoint caches: a second call within 2s does not re-invoke wt-metrics" {
-  COUNTER="$BATS_TEST_TMPDIR/calls"
-  printf '#!/bin/bash\necho x >> "%s"\necho "{\\"system\\":{},\\"disk\\":[],\\"docker\\":[],\\"worktrees\\":[],\\"sessions\\":[]}"\n' "$COUNTER" > "$BIN/wt-metrics"
-  chmod +x "$BIN/wt-metrics"
-  run php -r 'require getenv("INFRA_ROOT")."/console/server/api.php"; wt_api_metrics(); wt_api_metrics();'
-  [ "$status" -eq 0 ]
-  [ "$(wc -l < "$COUNTER")" -eq 1 ]
+@test "snapshot : section périmée marquée stale" {
+  snap 600
+  run api 'console_api_snapshot()'
+  echo "$output" | jq -e '.sections.system.stale == true and .sections.disk.stale == true' >/dev/null
 }
 
-@test "metrics endpoint refreshes the cache once it is older than ~2s" {
-  COUNTER="$BATS_TEST_TMPDIR/calls2"
-  printf '#!/bin/bash\necho x >> "%s"\necho "{\\"system\\":{},\\"disk\\":[],\\"docker\\":[],\\"worktrees\\":[],\\"sessions\\":[]}"\n' "$COUNTER" > "$BIN/wt-metrics"
-  chmod +x "$BIN/wt-metrics"
-  run php -r 'require getenv("INFRA_ROOT")."/console/server/api.php"; wt_api_metrics();'
+@test "snapshot absent ou illisible : réponse sûre" {
+  rm -f "$CONSOLE_SNAPSHOT"
+  run api 'console_api_snapshot()'
   [ "$status" -eq 0 ]
-  sleep 3
-  run php -r 'require getenv("INFRA_ROOT")."/console/server/api.php"; wt_api_metrics();'
+  echo "$output" | jq -e '.missing == true and .sections == {} and .generated_at == null' >/dev/null
+
+  echo 'pas du json' > "$CONSOLE_SNAPSHOT"
+  run api 'console_api_snapshot()'
   [ "$status" -eq 0 ]
-  [ "$(wc -l < "$COUNTER")" -eq 2 ]
+  echo "$output" | jq -e '.missing == true' >/dev/null
 }
 
-@test "metrics endpoint degrades to a safe default when wt-metrics emits invalid JSON" {
-  printf '#!/bin/bash\necho "not json"\n' > "$BIN/wt-metrics"; chmod +x "$BIN/wt-metrics"
-  run php -r 'require getenv("INFRA_ROOT")."/console/server/api.php"; echo wt_api_metrics();'
+@test "CSV : en-tête, lignes par section, injection de formule neutralisée" {
+  snap 0 '=cmd()'
+  run api 'console_api_csv()'
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e 'has("system") and has("disk") and has("docker") and has("sessions") and (has("worktrees")|not)' >/dev/null
+  [[ "${lines[0]}" == "section,key,value" ]]
+  [[ "$output" == *"system,mem_total_kb,16000000"* ]]
+  [[ "$output" == *"disk,/"* ]]
+  [[ "$output" == *"'=cmd()"* ]]
+  [[ "$output" == *"diagnostics,ram"* ]]
 }
 
-@test "metrics endpoint degrades to a safe default when wt-metrics emits nothing" {
-  printf '#!/bin/bash\ntrue\n' > "$BIN/wt-metrics"; chmod +x "$BIN/wt-metrics"
-  run php -r 'require getenv("INFRA_ROOT")."/console/server/api.php"; echo wt_api_metrics();'
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e 'has("system") and has("disk") and has("docker") and has("sessions") and (has("worktrees")|not)' >/dev/null
+@test "l'API ne lance aucune commande" {
+  run grep -c 'shell_exec\|exec(\|passthru\|popen\|proc_open' "$INFRA_ROOT/console/server/api.php"
+  [ "$output" = 0 ]
 }
 
-@test "router dispatches GET /api/metrics with JSON content type" {
+@test "router : /api/snapshot en JSON" {
+  snap
   run php -r '
-    $_SERVER["REQUEST_URI"]="/api/metrics"; $_SERVER["REQUEST_METHOD"]="GET";
+    $_SERVER["REQUEST_URI"]="/api/snapshot"; $_SERVER["REQUEST_METHOD"]="GET";
     $r = require getenv("INFRA_ROOT")."/console/server/router.php";
-    var_dump($r);
-  '
+    var_dump($r);'
   [ "$status" -eq 0 ]
   [[ "$output" == *"bool(true)"* ]]
-  echo "$output" | grep -o '{.*}' | jq -e 'has("system")' >/dev/null
+  echo "$output" | grep -o '{.*}' | jq -e '.sections.system.cadence == 2' >/dev/null
 }
 
-@test "router dispatches GET /api/metrics.csv as CSV" {
+@test "router : /api/snapshot.csv en CSV" {
+  snap
   run php -r '
-    $_SERVER["REQUEST_URI"]="/api/metrics.csv"; $_SERVER["REQUEST_METHOD"]="GET";
+    $_SERVER["REQUEST_URI"]="/api/snapshot.csv"; $_SERVER["REQUEST_METHOD"]="GET";
     $r = require getenv("INFRA_ROOT")."/console/server/router.php";
-    var_dump($r);
-  '
+    var_dump($r);'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"bool(true)"* ]]
-  [[ "$output" == *","* ]]
+  [[ "$output" == *"section,key,value"* ]]
 }
 
-@test "router answers not found to the former POST destroy route" {
-  run php -r '
-    $_SERVER["REQUEST_URI"]="/api/worktrees/x/destroy"; $_SERVER["REQUEST_METHOD"]="POST";
-    require getenv("INFRA_ROOT")."/console/server/router.php";
-  '
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"not found"* ]]
-  [ ! -f "$INFRA_ROOT/console/server/destroy.php" ]
+@test "router : anciennes routes et POST refusés" {
+  for uri in /api/metrics /api/worktrees/x/destroy; do
+    run php -r "
+      \$_SERVER['REQUEST_URI']='$uri'; \$_SERVER['REQUEST_METHOD']='POST';
+      require getenv('INFRA_ROOT').'/console/server/router.php';"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"not found"* ]]
+  done
 }
 
-@test "router serves an existing static file from console/public by returning false" {
-  mkdir -p "$INFRA_ROOT/console/public"
+@test "router : fichier statique servi, chemin inconnu en 404, traversée refusée" {
   echo hello > "$INFRA_ROOT/console/public/hello.txt"
   run php -r '
     $_SERVER["REQUEST_URI"]="/hello.txt"; $_SERVER["REQUEST_METHOD"]="GET";
     $r = require getenv("INFRA_ROOT")."/console/server/router.php";
-    var_dump($r);
-  '
+    var_dump($r);'
   rm -f "$INFRA_ROOT/console/public/hello.txt"
-  [ "$status" -eq 0 ]
   [[ "$output" == *"bool(false)"* ]]
-}
 
-@test "router 404s an unknown static path" {
   run php -r '
-    $_SERVER["REQUEST_URI"]="/does-not-exist.txt"; $_SERVER["REQUEST_METHOD"]="GET";
+    $_SERVER["REQUEST_URI"]="/../../../../etc/passwd"; $_SERVER["REQUEST_METHOD"]="GET";
     $r = require getenv("INFRA_ROOT")."/console/server/router.php";
-    var_dump($r);
-  '
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"bool(true)"* ]]
-  [[ "$output" == *"not found"* ]]
-}
-
-@test "router refuses to serve outside console/public via path traversal" {
-  SECRET="$BATS_TEST_TMPDIR/secret.txt"
-  echo topsecret > "$SECRET"
-  run php -r '
-    $_SERVER["REQUEST_URI"]="/../../../../../../../../etc/passwd"; $_SERVER["REQUEST_METHOD"]="GET";
-    $r = require getenv("INFRA_ROOT")."/console/server/router.php";
-    var_dump($r);
-  '
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"bool(true)"* ]]
+    var_dump($r);'
   [[ "$output" == *"not found"* ]]
   [[ "$output" != *"root:"* ]]
 }

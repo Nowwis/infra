@@ -14,18 +14,18 @@
     </div>
     <div class="search">
       <input id="q" type="search" autocomplete="off" spellcheck="false"
-             placeholder="Filtrer projets, containers, sessions…"
+             placeholder="Filtrer projets, sessions, containers…"
              aria-label="Filtrer">
     </div>
     <div class="status" id="status">
       <span class="dot" id="status-dot" aria-hidden="true"></span>
       <span id="status-text">connexion…</span>
-      <a class="export" id="export" href="/api/metrics.csv" download>Exporter CSV</a>
+      <a class="export" id="export" href="/api/snapshot.csv" download>Exporter CSV</a>
     </div>
   </header>
 
   <main>
-    <!-- Vitals: le coup d'œil santé -->
+    <!-- Vitals : le coup d'œil santé -->
     <section id="system" class="vitals" aria-label="Ressources système">
       <div class="vital" data-k="ram">   <span class="vital-h">Mémoire</span><div class="meter"><span></span></div><span class="vital-v">—</span></div>
       <div class="vital" data-k="swap">  <span class="vital-h">Swap</span>   <div class="meter"><span></span></div><span class="vital-v">—</span></div>
@@ -34,16 +34,28 @@
     </section>
 
     <div class="grid">
-      <section id="docker" class="panel">
-        <div class="panel-h"><h2>Docker</h2><span class="count" data-count>—</span></div>
-        <div class="groups" data-groups></div>
-        <p class="empty" data-empty hidden>Aucun container en cours.</p>
+      <section id="diagnostics" class="panel">
+        <div class="panel-h"><h2>Diagnostics</h2><span class="count" data-count>—</span></div>
+        <div class="rows" data-rows></div>
+        <p class="empty" data-empty hidden>Rien à signaler.</p>
+      </section>
+
+      <section id="projects" class="panel">
+        <div class="panel-h"><h2>Projets</h2><span class="count" data-count>—</span></div>
+        <div class="rows" data-rows></div>
+        <p class="empty" data-empty hidden>Aucun projet configuré.</p>
       </section>
 
       <section id="sessions" class="panel">
         <div class="panel-h"><h2>Sessions Claude</h2><span class="count" data-count>—</span></div>
         <div class="groups" data-groups></div>
         <p class="empty" data-empty hidden>Aucune session active.</p>
+      </section>
+
+      <section id="docker" class="panel">
+        <div class="panel-h"><h2>Docker</h2><span class="count" data-count>—</span></div>
+        <div class="groups" data-groups></div>
+        <p class="empty" data-empty hidden>Aucun container.</p>
       </section>
 
       <section id="disk" class="panel">

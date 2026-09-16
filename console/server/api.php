@@ -1,118 +1,144 @@
 <?php
 declare(strict_types=1);
 
-/** Resolve the wt-metrics binary: WT_METRICS_BIN env, else <repo>/bin/wt-metrics. */
-function wt_metrics_bin(): string
+/** Chemin de l'instantané : CONSOLE_SNAPSHOT, sinon CONSOLE_STATE/snapshot.json, sinon ~/.local/state/console. */
+function console_api_snapshot_path(): string
 {
-    $env = getenv('WT_METRICS_BIN');
-    return $env !== false && $env !== '' ? $env : dirname(__DIR__, 2) . '/bin/wt-metrics';
+    $env = getenv('CONSOLE_SNAPSHOT');
+    if ($env !== false && $env !== '') {
+        return $env;
+    }
+    $state = getenv('CONSOLE_STATE');
+    if ($state === false || $state === '') {
+        $home = getenv('HOME');
+        $state = ($home !== false && $home !== '' ? $home : '/tmp') . '/.local/state/console';
+    }
+    return $state . '/snapshot.json';
 }
 
-/** Resolve the cache file path: WT_DASH_CACHE env, else a temp path. */
-function wt_dash_cache_path(): string
+/** Réponse servie quand l'instantané est absent ou illisible (le collecteur ne tourne pas). */
+function console_api_missing(): array
 {
-    $env = getenv('WT_DASH_CACHE');
-    return $env !== false && $env !== '' ? $env : sys_get_temp_dir() . '/wt-dash-metrics.json';
-}
-
-/** The safe default payload used whenever wt-metrics is unavailable or emits invalid output. */
-function wt_api_metrics_default(): string
-{
-    return '{"system":{},"disk":[],"docker":[],"sessions":[]}';
+    return ['generated_at' => null, 'sections' => new stdClass(), 'missing' => true];
 }
 
 /**
- * Aggregated dashboard metrics as a JSON string.
- * Runs `wt-metrics all`, cached to a file for ~2s to avoid re-shelling on
- * every request. On invalid, empty, or failing output, falls back to a safe
- * default JSON object carrying all four expected keys.
+ * L'instantané du collecteur, chaque section enrichie de son âge et de `stale`
+ * (âge supérieur à trois fois sa cadence). Cette API ne lance aucune commande :
+ * tout le travail est fait en tâche de fond par bin/console-collector.
  */
-function wt_api_metrics(): string
+function console_api_snapshot(): string
 {
-    $cache = wt_dash_cache_path();
-    if (is_file($cache) && (time() - (int) @filemtime($cache)) < 2) {
-        $cached = @file_get_contents($cache);
-        if ($cached !== false && $cached !== '' && json_decode($cached) !== null) {
-            return $cached;
+    $raw = @file_get_contents(console_api_snapshot_path());
+    $data = $raw === false ? null : json_decode($raw, true);
+    if (!is_array($data) || !isset($data['sections']) || !is_array($data['sections'])) {
+        return (string) json_encode(console_api_missing(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    $now = time();
+    foreach ($data['sections'] as $name => $section) {
+        if (!is_array($section)) {
+            unset($data['sections'][$name]);
+            continue;
         }
+        $cadence = (int) ($section['cadence'] ?? 0);
+        $age = $now - (int) ($section['collected_at'] ?? 0);
+        $data['sections'][$name]['age_s'] = $age;
+        $data['sections'][$name]['stale'] = $cadence > 0 && $age > $cadence * 3;
     }
+    $data['missing'] = false;
 
-    $bin = wt_metrics_bin();
-    $out = @shell_exec(escapeshellarg($bin) . ' all 2>/dev/null');
-
-    if ($out === null || trim((string) $out) === '' || json_decode((string) $out) === null) {
-        $out = wt_api_metrics_default();
-    }
-
-    @file_put_contents($cache, $out);
-    return $out;
+    return (string) json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 }
 
 /**
- * Neutralize CSV formula injection: if the cell's first character could be
- * interpreted as a formula trigger by a spreadsheet application (=, +, -, @,
- * tab, or CR), prefix it with a single quote so it is opened as inert text.
+ * Neutralise l'injection de formule : une cellule commençant par =, +, -, @, une
+ * tabulation ou un retour chariot est préfixée d'une apostrophe pour rester inerte.
  */
-function wt_api_csv_safe_cell(string $value): string
+function console_api_csv_safe_cell(string $value): string
 {
     if ($value === '') {
         return $value;
     }
 
-    return in_array($value[0], ['=', '+', '-', '@', "\t", "\r"], true)
-        ? "'" . $value
-        : $value;
+    return in_array($value[0], ['=', '+', '-', '@', "\t", "\r"], true) ? "'" . $value : $value;
 }
 
-/** Flatten the aggregated metrics into a CSV string (header row + data rows). */
-function wt_api_csv(): string
+/** Aplatit l'instantané en CSV (une ligne par élément de section). */
+function console_api_csv(): string
 {
-    $decoded = json_decode(wt_api_metrics(), true);
-    $metrics = is_array($decoded) ? $decoded : [];
+    $decoded = json_decode(console_api_snapshot(), true);
+    $sections = is_array($decoded) && isset($decoded['sections']) && is_array($decoded['sections'])
+        ? $decoded['sections'] : [];
+    $data = static function (string $name) use ($sections) {
+        return $sections[$name]['data'] ?? null;
+    };
+    $str = static function ($v): string {
+        return is_scalar($v) ? (string) $v : '';
+    };
 
     $rows = [['section', 'key', 'value']];
 
-    $system = $metrics['system'] ?? [];
+    $system = $data('system');
     if (is_array($system)) {
         foreach ($system as $k => $v) {
-            $rows[] = ['system', (string) $k, is_scalar($v) ? (string) $v : json_encode($v)];
+            if (is_array($v)) {
+                foreach ($v as $k2 => $v2) {
+                    $rows[] = ['system', $k . '.' . $k2, $str($v2)];
+                }
+            } else {
+                $rows[] = ['system', (string) $k, $str($v)];
+            }
         }
     }
 
-    $disk = $metrics['disk'] ?? [];
+    $disk = $data('disk');
     if (is_array($disk)) {
         foreach ($disk as $d) {
-            $mount = is_array($d) ? ($d['mount'] ?? '') : '';
-            $usePct = is_array($d) ? ($d['use_pct'] ?? '') : '';
-            $rows[] = ['disk', (string) $mount, 'use_pct=' . (string) $usePct];
+            $rows[] = ['disk', $str($d['mount'] ?? ''), 'use_pct=' . $str($d['use_pct'] ?? '')];
         }
     }
 
-    $docker = $metrics['docker'] ?? [];
+    $docker = $data('docker');
     if (is_array($docker)) {
         foreach ($docker as $c) {
-            $name = is_array($c) ? ($c['name'] ?? '') : '';
-            $cpu = is_array($c) ? ($c['cpu_pct'] ?? '') : '';
-            $rows[] = ['docker', (string) $name, 'cpu_pct=' . (string) $cpu];
+            $rows[] = ['docker', $str($c['name'] ?? ''),
+                'project=' . $str($c['project'] ?? '') . ' state=' . $str($c['state'] ?? '')
+                . ' cpu=' . $str($c['cpu_pct'] ?? '') . ' restarts=' . $str($c['restarts'] ?? '')];
         }
     }
 
-    $sessions = $metrics['sessions'] ?? [];
-    if (is_array($sessions)) {
-        foreach ($sessions as $s) {
-            $pid = is_array($s) ? ($s['pid'] ?? '') : '';
-            $kind = is_array($s) ? ($s['kind'] ?? '') : '';
-            $rss = is_array($s) ? ($s['rss_kb'] ?? '') : '';
-            $rows[] = ['session', (string) $pid, (string) $kind . ' rss=' . (string) $rss];
+    $sessions = $data('sessions');
+    if (is_array($sessions) && isset($sessions['items']) && is_array($sessions['items'])) {
+        foreach ($sessions['items'] as $s) {
+            $rows[] = ['session', $str($s['session_id'] ?? ''),
+                'project=' . $str($s['project'] ?? '') . ' rss_kb=' . $str($s['rss_kb'] ?? '')
+                . ' ticket=' . $str($s['ticket'] ?? '')];
+        }
+    }
+
+    $projects = $data('projects');
+    if (is_array($projects)) {
+        foreach ($projects as $p) {
+            $rows[] = ['project', $str($p['name'] ?? ''),
+                'state=' . $str($p['state'] ?? '') . ' ticket=' . $str($p['ticket'] ?? '')
+                . ' dirty=' . $str($p['dirty'] ?? '')];
+        }
+    }
+
+    $diagnostics = $data('diagnostics');
+    if (is_array($diagnostics)) {
+        foreach ($diagnostics as $d) {
+            $rows[] = ['diagnostics', $str($d['id'] ?? ''),
+                $str($d['level'] ?? '') . ' ' . $str($d['title'] ?? '')];
         }
     }
 
     $buf = fopen('php://temp', 'r+');
     foreach ($rows as $i => $row) {
-        // Header row (index 0) is a fixed, trusted literal; every data row's
-        // cells may carry attacker-influenced content (project/container
-        // names, mount points, …), so neutralize formula-injection triggers.
-        fputcsv($buf, $i === 0 ? $row : array_map('wt_api_csv_safe_cell', $row));
+        // L'en-tête est un littéral de confiance ; les données peuvent venir de noms
+        // de conteneurs ou de points de montage, donc on neutralise les formules.
+        fputcsv($buf, $i === 0 ? $row : array_map('console_api_csv_safe_cell', $row));
     }
     rewind($buf);
     $csv = stream_get_contents($buf);

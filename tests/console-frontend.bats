@@ -1,20 +1,28 @@
 load helpers
 setup() { setup_infra; P="$INFRA_ROOT/console/public"; }
-@test "index.html loads app.js and style.css and has section containers" {
+
+@test "index.html : sections attendues, CSS et JS locaux" {
   [ -f "$P/index.html" ] && [ -f "$P/app.js" ] && [ -f "$P/style.css" ]
-  grep -q 'app.js' "$P/index.html"; grep -q 'style.css' "$P/index.html"
-  for id in system docker sessions disk; do grep -q "id=\"$id\"" "$P/index.html"; done
+  grep -q 'app.js' "$P/index.html"
+  grep -q 'style.css' "$P/index.html"
+  for id in system diagnostics projects sessions docker disk; do
+    grep -q "id=\"$id\"" "$P/index.html"
+  done
 }
-@test "app.js polls /api/metrics; index exposes CSV export + search" {
-  grep -q '/api/metrics' "$P/app.js"
-  grep -qi 'setInterval\|setTimeout' "$P/app.js"
-  grep -q 'metrics.csv' "$P/index.html"
+
+@test "app.js interroge /api/snapshot, rafraîchit et signale les données périmées" {
+  grep -q '/api/snapshot' "$P/app.js"
+  grep -qi 'setInterval' "$P/app.js"
+  grep -q 'stale' "$P/app.js"
+  grep -q 'snapshot.csv' "$P/index.html"
   grep -q 'id="q"' "$P/index.html"
 }
-@test "no worktree UI nor destroy action remains" {
-  run grep -qiE 'worktree|/destroy|\.wt[-{:]' "$P/index.html" "$P/app.js" "$P/style.css"
+
+@test "aucune écriture : ni action destructive, ni innerHTML, ni worktree" {
+  run grep -qiE 'innerHTML|/destroy|worktree|method: *.POST' "$P/app.js" "$P/index.html" "$P/style.css"
   [ "$status" -eq 1 ]
 }
-@test "no external CDN dependency" {
+
+@test "aucune dépendance externe" {
   ! grep -qiE 'https?://[^"]+\.(js|css)' "$P/index.html"
 }
