@@ -78,7 +78,7 @@ Format : `nom|repo|main|develop|forge`
 - `develop` = `develop` si `origin/develop` existe, sinon vide : base des features (repli sur `main` si vide) ;
 - `forge` = `github` ou `gitlab` (d'après l'URL `origin`).
 
-Rempli à l'implémentation d'après l'état réel des remotes. État relevé le 2026-09-15 : 15 repos applicatifs sous `~/Project/*/*` + `Infra` + `_nowia` ; forges GitHub sauf `stream.consotrust.com` (gitlab.agena3000.com) et `services-rest.bifacto.com` (gitlab.com) ; pas de `develop` sur `parisrental.com`, `hermes-webui`, `services-rest.bifacto.com`. Un repo absent de la liste n'est pas protégé par la garde.
+Rempli d'après les références distantes réelles (relevé du 2026-09-15) : **14 projets** — `Infra` (main seul) et 13 repos applicatifs avec main + develop ; forge GitHub sauf `stream.consotrust.com` (gitlab.agena3000.com). **Exclus** : `AgentIA/hermes-webui` (repo tiers), `_nowia` (pas de remote), `Diplam09/services-rest.bifacto.com` (GitLab tiers, référence `origin/main?` cassée). Un repo absent de la liste n'est pas protégé par la garde.
 
 ### 4.2 État d'un projet : `<git-common-dir>/claude-work.json`
 Invisible pour git, jamais versionné. Écritures sérialisées par `flock` sur `<git-common-dir>/claude-work.lock`. Fichier absent ≡ état `free` sans PR en attente.

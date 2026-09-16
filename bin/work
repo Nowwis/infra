@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# work — workflow gitflow à checkout unique : un ticket en écriture à la fois par projet
+# (docs/2026-09-15-work-console-design.md §4.3).
+set -uo pipefail
+WORK_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+export WORK_ROOT
+source "$WORK_ROOT/lib/work/common.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: work <commande> [options]
+  start <KEY> [--hotfix] [--slug S]   démarre un ticket depuis main/develop à jour
+  pr [--title T --body-file F]        pousse, ouvre la PR, revient sur main
+  merged [KEY] [--confirmed]          nettoie une PR mergée (facultatif)
+  resume <KEY>                        reprend une branche en attente
+  park                                met le ticket de côté (commit wip + push)
+  adopt <KEY>                         enregistre la branche courante comme ticket
+  takeover                            reprend un ticket tenu par une autre session
+  status [--all] [--json]             état du projet courant (ou de tous)
+EOF
+}
+
+[ $# -ge 1 ] || { usage; exit 2; }
+cmd="$1"; shift
+case "$cmd" in
+  start|pr|merged|resume|park|adopt|takeover|status)
+    source "$WORK_ROOT/lib/work/cmd_$cmd.sh"
+    "cmd_$cmd" "$@"
+    ;;
+  -h|--help) usage ;;
+  *) usage; exit 2 ;;
+esac

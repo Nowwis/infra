@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# work-hook-install [--uninstall] — branche la garde d'écriture (PreToolUse), le rappel SessionStart
+# et le skill work dans la configuration Claude Code. Remplace guard-branch-clean.sh.
+# Idempotent ; sauvegarde settings.json avant toute écriture.
+set -euo pipefail
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+GUARD="$HERE/work-guard"
+SESSION="$HERE/work-session-hook"
+SKILL_SRC="$(cd "$HERE/.." && pwd)/skills/work"
+SETTINGS="${WORK_SETTINGS:-$HOME/.claude/settings.json}"
+SKILLS_DIR="${WORK_SKILLS_DIR:-$HOME/.claude/skills}"
+MATCHER="Edit|MultiEdit|Write|NotebookEdit|Bash"
+
+die() { printf 'work-hook-install : %s\n' "$*" >&2; exit 1; }
+
+mkdir -p "$(dirname "$SETTINGS")" "$SKILLS_DIR"
+[ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+jq -e . "$SETTINGS" >/dev/null 2>&1 || die "settings.json invalide : $SETTINGS (rien n'a été modifié)"
+
+# settings.json sans nos commandes ni guard-branch-clean, groupes et événements vides retirés.
+strip() {
+  jq --arg g "$GUARD" --arg s "$SESSION" '
+    def clean(ev):
+      if (.hooks // {}) | has(ev) then
+        .hooks[ev] |= (map(.hooks |= map(select(.command != $g and .command != $s
+                                               and ((.command // "") | test("guard-branch-clean") | not))))
+                       | map(select(.hooks | length > 0)))
+        | if (.hooks[ev] | length) == 0 then del(.hooks[ev]) else . end
+      else . end;
+    clean("PreToolUse") | clean("SessionStart")
+    | if has("hooks") and (.hooks | length) == 0 then del(.hooks) else . end' "$SETTINGS"
+}
+
+backup() { cp "$SETTINGS" "$SETTINGS.bak-$(date +%Y%m%d%H%M%S)"; }
+
+replace_settings() {
+  local tmp; tmp="$(mktemp "$SETTINGS.XXXXXX")"
+  cat > "$tmp"
+  mv "$tmp" "$SETTINGS"
+}
+
+if [ "${1:-}" = "--uninstall" ]; then
+  backup
+  strip | replace_settings
+  if [ -L "$SKILLS_DIR/work" ]; then rm -f "$SKILLS_DIR/work"; fi
+  echo "work : garde, rappel SessionStart et skill retirés ($SETTINGS). guard-branch-clean n'est pas restauré."
+  exit 0
+fi
+[ $# -eq 0 ] || die "usage : work-hook-install [--uninstall]"
+
+backup
+strip | jq --arg g "$GUARD" --arg s "$SESSION" --arg m "$MATCHER" '
+  .hooks = (.hooks // {})
+  | .hooks.PreToolUse = ((.hooks.PreToolUse // []) + [{matcher: $m, hooks: [{type: "command", command: $g, timeout: 10}]}])
+  | .hooks.SessionStart = ((.hooks.SessionStart // []) + [{matcher: "*", hooks: [{type: "command", command: $s, timeout: 10}]}])' \
+  | replace_settings
+if [ ! -e "$SKILLS_DIR/work" ] && [ ! -L "$SKILLS_DIR/work" ]; then ln -s "$SKILL_SRC" "$SKILLS_DIR/work"; fi
+echo "work : garde d'écriture et rappel SessionStart installés dans $SETTINGS ; skill lié dans $SKILLS_DIR/work"

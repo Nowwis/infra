@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# work-session-hook — SessionStart : rappelle l'état work du projet de la session
+# (docs/2026-09-15-work-console-design.md §4.5). Lecture seule, silencieux hors projet, toujours exit 0.
+set +e
+{
+  WORK_BIN="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/work"
+  IN="$(cat)"
+  CWD="$(jq -r '.cwd // empty' <<<"$IN")"
+  SID="$(jq -r '.session_id // empty' <<<"$IN")"
+  [ -n "$CWD" ] && [ -d "$CWD" ] || exit 0
+
+  ST="$(cd "$CWD" && CLAUDE_CODE_SESSION_ID="$SID" "$WORK_BIN" status --json)" || exit 0
+  CTX="$(jq -r '
+    "work · \(.name) : "
+    + (if .state == "active" then
+         "ticket \(.ticket) sur \(.branch) "
+         + (if .is_me then "tenu par toi — écriture autorisée sur cette branche."
+            elif .owner_alive then "tenu par une autre session (\(.owner[0:8])) — lecture seule sur ce projet."
+            else "tenu par une session terminée (\(.owner[0:8])) — lecture seule ; `work takeover` si Simon le demande." end)
+       else "libre — lecture seule tant que `work start <KEY>` n'\''est pas fait (feature depuis develop, hotfix depuis main)." end)
+    + (if (.pending_prs | length) > 0 then
+         "\nPR en attente : "
+         + (.pending_prs | map(.ticket + (if .parked then " (mis de côté)" elif .url then " " + .url else "" end)) | join(", "))
+       else "" end)
+    + (if (.drift | index("hors-workflow")) != null then
+         "\n⚠ hors workflow : branche \(.current_branch), \(.dirty) fichier(s) modifié(s) — à régulariser avec Simon (work adopt, commit ou abandon)."
+       else "" end)' <<<"$ST")" || exit 0
+  [ -n "$CTX" ] || exit 0
+
+  jq -n --arg c "$CTX" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c}}'
+  exit 0
+} 2>/dev/null
