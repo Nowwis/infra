@@ -53,3 +53,30 @@ EOF
   [ "$status" -ne 0 ]
   [ "$(cat "$WORK_SETTINGS")" = 'pas du json' ]
 }
+
+@test "install déclare le hook de journal sur les huit événements" {
+  local J="$INFRA_ROOT/bin/console-hook"
+  run "$I"
+  [ "$status" -eq 0 ]
+  jq -e --arg h "$J" '. as $s
+    | ["SessionStart","UserPromptSubmit","PreToolUse","PostToolUse",
+       "Notification","Stop","SubagentStop","SessionEnd"]
+    | all(. as $e | ([$s.hooks[$e][]?.hooks[]?.command] | index($h)) != null)' "$WORK_SETTINGS" >/dev/null
+}
+
+@test "install reste idempotent avec le hook de journal" {
+  local J="$INFRA_ROOT/bin/console-hook"
+  "$I" >/dev/null
+  "$I" >/dev/null
+  jq -e --arg h "$J" '[.. | objects | select(has("command")) | .command]
+    | map(select(. == $h)) | length == 8' "$WORK_SETTINGS" >/dev/null
+}
+
+@test "uninstall retire aussi le hook de journal" {
+  local J="$INFRA_ROOT/bin/console-hook"
+  "$I" >/dev/null
+  run "$I" --uninstall
+  [ "$status" -eq 0 ]
+  jq -e --arg h "$J" '[.. | objects | select(has("command")) | .command] | index($h) == null' \
+    "$WORK_SETTINGS" >/dev/null
+}
