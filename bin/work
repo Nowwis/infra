@@ -16,6 +16,7 @@ usage: work <commande> [options]
   park                                met le ticket de côté (commit wip + push)
   adopt <KEY>                         enregistre la branche courante comme ticket
   takeover                            reprend un ticket tenu par une autre session
+  sync [--tidy]                       met main et develop à jour, sans ticket
   status [--all] [--json]             état du projet courant (ou de tous)
 EOF
 }
@@ -23,7 +24,7 @@ EOF
 [ $# -ge 1 ] || { usage; exit 2; }
 cmd="$1"; shift
 case "$cmd" in
-  start|pr|merged|resume|park|adopt|takeover|status)
+  start|pr|merged|resume|park|adopt|takeover|sync|status)
     source "$WORK_ROOT/lib/work/cmd_$cmd.sh"
     "cmd_$cmd" "$@"
     ;;
