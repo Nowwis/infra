@@ -91,3 +91,37 @@ fichiers en direct. Seul le collecteur doit être redémarré s'il a changé.
 Ne jamais exposer le service publiquement (`CONSOLE_BIND=0.0.0.0`) : l'authentification est
 assurée par Traefik, pas par `php -S`. L'API ne fait que lire un fichier JSON local, mais elle
 révèle l'état de la machine et des projets.
+
+## Journal d'activité
+
+Un hook unique (`bin/console-hook`) est branché sur huit événements Claude Code —
+`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `Stop`,
+`SubagentStop`, `SessionEnd` — et ajoute **une ligne JSON** par événement dans
+`~/.local/state/console/events-<date UTC>.jsonl` :
+
+```json
+{"ts":"2026-09-16T10:31:02Z","event":"PreToolUse","session":"b4681ad6-…","cwd":"/home/webadmin/Project/Diplam09/doc.bifacto.com",
+ "project":"bifacto-doc","tool":"Bash","tool_use_id":"toolu_…","summary":"make test","result":null}
+```
+
+**Ce qui n'est jamais enregistré** : le texte des prompts. Un `UserPromptSubmit` ne laisse que
+l'événement, sans contenu. Les secrets sont masqués avant écriture (mots de passe, jetons,
+`Bearer …`, identifiants dans les URL, chaînes de plus de 32 caractères), et chaque résumé est
+tronqué à 300 caractères.
+
+La garde d'écriture y trace aussi ses refus (`"event":"guard.block"`), ce qui permet de voir
+depuis la console qu'une session a tenté d'écrire sans ticket.
+
+**Coût** : environ 13 ms par appel d'outil (bash + un seul `jq`), après les ~41 ms de la garde.
+Le hook sort toujours en succès et n'écrit rien sur la sortie standard : un journal cassé ne doit
+jamais bloquer un outil.
+
+**Rétention** : 7 jours, purge faite par le collecteur d'après la date du nom de fichier.
+
+### Ce que le collecteur en déduit
+
+- Section `activity` (cadence 5 s) : les 200 derniers événements, du plus récent au plus ancien.
+- Section `sessions` : un statut par session vivante —
+  `executing` (un outil est lancé, sans résultat reçu), `waiting` (une notification attend une
+  réponse), `working` (un résultat vient d'arriver), `idle` (après `Stop`), `unknown` (pas encore
+  d'événement) — avec le détail, l'ancienneté et le dernier blocage éventuel de la garde.

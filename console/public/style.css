@@ -137,3 +137,19 @@ main{max-width:1400px;margin:0 auto;padding:18px 20px 40px}
 .proj-sub{margin-top:5px;color:var(--muted);font:500 12px/1.5 var(--mono)}
 .row.off .r-name{color:var(--faint)}
 .status.stale .dot{background:var(--warn)}
+
+/* Activité (journal des sessions) */
+.act{padding:8px 16px;border-bottom:1px solid var(--border)}
+.act:last-child{border-bottom:0}
+.act-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.act-time{font:500 11.5px/1 var(--mono);color:var(--faint);font-variant-numeric:tabular-nums}
+.act-sum{margin-top:3px;color:var(--muted);font:500 12px/1.4 var(--mono);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.act-block{background:color-mix(in srgb,var(--crit) 7%,transparent)}
+.act-block .act-sum{color:var(--crit)}
+
+/* Statuts de session */
+.tag.st-exec{color:var(--ok);background:var(--ok-bg)}
+.tag.st-wait{color:var(--warn);background:var(--warn-bg)}
+.tag.st-work{color:var(--accent-ink);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.tag.st-idle{color:var(--faint);background:var(--surface-2)}

@@ -30,7 +30,13 @@
     var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
     if (d) return d + 'j ' + h + 'h';
     if (h) return h + 'h ' + m + 'm';
-    return m + 'm';
+    if (m) return m + 'm';
+    return Math.max(0, Math.floor(s)) + 's';
+  }
+  function hhmm(ts) {
+    var d = new Date(ts);
+    return isNaN(d.getTime()) ? '—' :
+      ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
   }
   function level(ratio, warn, crit) { return ratio >= crit ? 'lvl-crit' : ratio >= warn ? 'lvl-warn' : 'lvl-ok'; }
   function panel(id) { return document.getElementById(id); }
@@ -109,12 +115,45 @@
       var meta = [];
       if (p.current_branch) meta.push('branche ' + p.current_branch);
       if (num(p.dirty) > 0) meta.push(num(p.dirty) + ' fichier(s) modifié(s)');
+      if (num(p.untracked) > 0) meta.push(num(p.untracked) + ' non suivi(s)');
       (p.pending_prs || []).forEach(function (pr) {
         meta.push('PR ' + (pr.ticket || '') + (pr.parked ? ' (de côté)' : '') + (pr.gh_state ? ' · ' + pr.gh_state : ''));
       });
       (p.drift || []).forEach(function (d) { meta.push('⚠ ' + d); });
       if (meta.length) row.appendChild(el('div', 'proj-sub', meta.join('  ·  ')));
       row.dataset.search = ((p.name || '') + ' ' + (p.ticket || '') + ' ' + (p.current_branch || '')).toLowerCase();
+      host.appendChild(row);
+    });
+  }
+
+  // --- activité (journal des sessions) ------------------------------------
+  var STATUS = {
+    executing: { label: 'exécute', cls: 'st-exec' },
+    waiting: { label: 'attend une réponse', cls: 'st-wait' },
+    working: { label: 'travaille', cls: 'st-work' },
+    idle: { label: 'au repos', cls: 'st-idle' },
+    unknown: { label: '—', cls: 'st-idle' }
+  };
+  function statusOf(s) { return STATUS[s && s.status] || STATUS.unknown; }
+
+  function renderActivity(list) {
+    list = list || [];
+    setCount('activity', list.length);
+    setEmpty('activity', !list.length);
+    var host = panel('activity').querySelector('[data-rows]');
+    clear(host);
+    list.slice(0, 80).forEach(function (e) {
+      var blocked = e.event === 'guard.block';
+      var row = el('div', 'act' + (blocked ? ' act-block' : ''));
+      var top = el('div', 'act-top');
+      top.appendChild(el('span', 'act-time', hhmm(e.ts)));
+      top.appendChild(el('span', 'tag' + (blocked ? ' crit' : ''), blocked ? 'bloqué' : (e.tool || e.event)));
+      if (e.project) top.appendChild(el('span', 'r-sub', e.project));
+      if (e.result === 'error') top.appendChild(el('span', 'tag warn', 'erreur'));
+      row.appendChild(top);
+      if (e.summary) row.appendChild(el('div', 'act-sum', e.summary));
+      row.dataset.search = ((e.project || '') + ' ' + (e.tool || '') + ' ' + (e.event || '') + ' '
+        + (e.summary || '') + ' ' + (e.session || '')).toLowerCase();
       host.appendChild(row);
     });
   }
@@ -174,15 +213,23 @@
     var groups = groupBy(items, function (s) { return s.system ? 'système' : (s.project || s.tmux || '—'); })
       .map(function (g) {
         var rss = g.items.reduce(function (a, s) { return a + num(s.rss_kb); }, 0);
-        g.meta = g.items.length + ' · ' + gib(rss);
+        var busy = g.items.filter(function (s) { return s.status === 'executing' || s.status === 'waiting'; }).length;
+        g.meta = g.items.length + (busy ? ' · ' + busy + ' actives' : '') + ' · ' + gib(rss);
         return g;
       });
     renderGroups('sessions', groups, function (s) {
+      var st = statusOf(s);
       var r = el('div', 'row');
       var left = el('div', 'r-name');
+      left.appendChild(el('span', 'tag ' + st.cls, st.label));
       if (s.ticket) left.appendChild(el('span', 'tag rc', s.ticket));
       left.appendChild(document.createTextNode(' ' + (s.tmux || s.name || ('pid ' + (s.pid != null ? s.pid : '—')))));
-      if (s.name && s.tmux) { var sub = el('span', 'r-sub'); sub.textContent = '  ' + s.name; left.appendChild(sub); }
+      if (s.status_detail) {
+        var sub = el('span', 'r-sub');
+        sub.textContent = '  ' + s.status_detail + (s.status_since_s != null ? ' · ' + etime(s.status_since_s) : '');
+        left.appendChild(sub);
+      }
+      if (s.last_block) left.appendChild(el('span', 'tag crit', 'bloquée'));
       r.appendChild(left);
       r.appendChild(metricsCell([
         ['ram', bytes(num(s.rss_kb) * 1024)],
@@ -190,7 +237,7 @@
         ['mcp', (s.mcp || []).length]
       ]));
       r.dataset.search = ((s.project || '') + ' ' + (s.tmux || '') + ' ' + (s.name || '') + ' '
-        + (s.cwd || '') + ' ' + (s.ticket || '') + ' ' + (s.pid || '')).toLowerCase();
+        + (s.cwd || '') + ' ' + (s.ticket || '') + ' ' + (s.status || '') + ' ' + (s.pid || '')).toLowerCase();
       return r;
     });
   }
@@ -262,7 +309,7 @@
         if (t && vis > 0) g.open = true;
       });
     });
-    ['diagnostics', 'projects', 'disk'].forEach(function (id) {
+    ['diagnostics', 'projects', 'activity', 'disk'].forEach(function (id) {
       panel(id).querySelectorAll('[data-search]').forEach(function (r) {
         r.classList.toggle('hidden', !!t && (r.dataset.search || '').indexOf(t) < 0);
       });
@@ -296,6 +343,7 @@
         renderVitals(dataOf(snap, 'system'), dataOf(snap, 'disk'));
         renderDiagnostics(dataOf(snap, 'diagnostics'));
         renderProjects(dataOf(snap, 'projects'));
+        renderActivity(dataOf(snap, 'activity'));
         renderSessions(dataOf(snap, 'sessions'));
         renderDocker(dataOf(snap, 'docker'));
         renderDisk(dataOf(snap, 'disk'));
