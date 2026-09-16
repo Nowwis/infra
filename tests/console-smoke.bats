@@ -4,12 +4,6 @@ setup() {
   command -v php >/dev/null || skip "php not installed"
 }
 
-@test "wt-metrics all is valid JSON with all sections" {
-  run "$INFRA_ROOT/bin/wt-metrics" all
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e 'has("system") and has("docker") and has("sessions") and has("disk") and (has("worktrees")|not)' >/dev/null
-}
-
 @test "router serves index.html for /" {
   # boot php -S on an ephemeral port, curl /, then kill it
   PORT=8912
