@@ -1,173 +1,93 @@
-# Dashboard `worktree.docker.test`
+# Console dev (`console.docker.test`)
 
-A small read-only web dashboard for observing the VPS: system load, running docker
-containers, active Claude sessions, and disk usage. It reads what `docker stats`
-and the host already know. Worktrees were removed on 2026-09-15; this dashboard is
-replaced by the console (see `docs/2026-09-15-work-console-design.md`, lot 3).
+Console d'observation **en lecture seule** du VPS : vitals, diagnostics, état des projets
+`work`, sessions Claude, conteneurs Docker et disques. La page ne lance aucune commande :
+un collecteur en tâche de fond écrit un instantané, la page le lit.
 
-## What it shows
+Elle remplace le dashboard `worktree.docker.test`, retiré avec les worktrees le 2026-09-15
+(voir `docs/2026-09-15-work-console-design.md`).
 
-`bin/wt-metrics all` aggregates four sections, each fail-safe (a section degrades to
-`{}`/`[]` if its underlying command is unavailable or fails — it never breaks the
-others):
+## Architecture
 
-- **system** — RAM/swap usage, load average, core count, CPU pressure (PSI).
-- **docker** — running containers: name, compose project, CPU %, memory.
-- **sessions** — Claude Code processes on the host: pid, kind (`claude` /
-  `remote-control` / `sdk-backend`), model, RSS, CPU %, age.
-- **disk** — `df` per mount point (size/used/available/use %).
+```
+bin/console-collector (systemd console-collector)
+    ├─ sections → ~/.local/state/console/sections/<nom>.json   (écriture atomique)
+    └─ assemble → ~/.local/state/console/snapshot.json
+console/server (php -S, systemd console-web) : lit l'instantané, ne lance rien
+console/public : rafraîchit /api/snapshot toutes les 2 s
+```
 
-The frontend (`dashboard/public/`) polls `GET /api/metrics` every ~3s and renders
-gauges for `system`, tables for the rest, plus small in-memory sparklines (never
-persisted, never sent anywhere). `GET /api/metrics.csv` exports the same data
-flattened as CSV (the "Export CSV" button in the top bar).
+| Section | Cadence | Contenu |
+|---|---|---|
+| `system` | 2 s | mémoire, swap, charge, PSI (cpu/mémoire/io), compteur `oom_kill` |
+| `sessions` | 5 s | sessions Claude vivantes : projet, tmux, RAM de l'arbre de processus, MCP, ticket tenu, MCP orphelins |
+| `projects` | 10 s | `work status --all` + état GitHub des PR en attente |
+| `docker` | 15 s | conteneurs : état, projet, CPU, mémoire, redémarrages, santé |
+| `diagnostics` | 15 s | constats `warn`/`crit` calculés sur les autres sections |
+| `disk` | 60 s | `df` par point de montage |
+| `prs` | 5 min, en tâche de fond | `gh pr view` des PR en attente (GitHub seulement) |
+| `docker_df` | 10 min, en tâche de fond | `docker system df` (≈ 11 s) |
 
-## Actions
+Chaque section est indépendante : une source indisponible donne une valeur par défaut et un
+diagnostic « source indisponible », jamais une erreur globale.
 
-None: the dashboard is strictly read-only. There is no way to stop a session or a
-docker stack from the UI, and no metric history beyond the in-memory sparklines.
+## Diagnostics
 
-## Prerequisites
+RAM disponible (< 20 % / < 10 %), swap (> 50 % / > 80 %), PSI mémoire (> 10 / > 25), PSI io
+(> 20 / > 40), disque par montage (> 85 % / > 95 %), hausse du compteur OOM sur 24 h,
+conteneurs `unhealthy` ou qui redémarrent (≥ 3 → critique), unités systemd utilisateur en
+échec (hors `init.scope`, toujours en échec sur cet hôte), serveurs MCP orphelins (> 3 / > 10),
+verrou `work` tenu par une session terminée.
 
-- `php` (CLI, with the built-in `php -S` dev server) — runs the backend and serves
-  the static frontend.
-- `jq` — used by `bin/wt-metrics` to shape every collector's JSON output.
-- `docker` — used for the `docker` section (`docker stats --no-stream`); the section
-  degrades to `[]` if docker is not available.
+`journalctl -k` étant réservé au groupe `adm`, les kills OOM se lisent dans `/proc/vmstat`.
 
-## Install / uninstall
+## API
+
+- `GET /api/snapshot` — l'instantané ; chaque section porte `age_s` et `stale` (âge > 3 × cadence).
+  Collecteur arrêté ou instantané illisible → `{"generated_at":null,"sections":{},"missing":true}`.
+- `GET /api/snapshot.csv` — le même contenu aplati (protection contre l'injection de formules).
+- Aucune route d'écriture.
+
+## Variables
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `CONSOLE_STATE` | `~/.local/state/console` | sections et instantané |
+| `CONSOLE_SNAPSHOT` | `$CONSOLE_STATE/snapshot.json` | instantané lu par l'API |
+| `CONSOLE_PROC` | `/proc` | source des vitals (simulée dans les tests) |
+| `CONSOLE_SESSIONS_DIR` | `~/.claude/sessions` | fichiers de session Claude |
+| `WORK_CONF` | `etc/work/projects.conf` | projets, pour rattacher conteneurs et sessions |
+| `CONSOLE_PORT` / `CONSOLE_BIND` | `8899` / IP Tailscale | écoute de `php -S` |
+| `CONSOLE_USER` / `CONSOLE_PASSWORD` | `admin` / — | secret basic-auth (hashé à l'install) |
+
+## Installation
 
 ```bash
-bin/wt-dash-install              # install: systemd --user unit + Traefik route
-bin/wt-dash-install --uninstall  # remove both, idempotently
+cp console/console.env.example console/console.env   # puis renseigner CONSOLE_PASSWORD
+make console-deploy      # pull + unités systemd + secret + redémarrage
 ```
 
-Install is idempotent: re-running it does not duplicate the Traefik block (it strips
-its own marker-delimited block and re-appends exactly one), and it overwrites the
-systemd unit in place.
+`bin/console-install` écrit les unités `console-web` et `console-collector` et le secret
+`configuration/traefik2/certs/console.htpasswd`. Il ne touche jamais la route Traefik, qui est
+versionnée. `bin/console-install --uninstall` retire unités et secret.
 
-Environment variables the installer honors (all optional, with sane defaults):
+Une mise à jour de code (UI, collecteur) ne demande qu'un `git pull` : le service web sert les
+fichiers en direct. Seul le collecteur doit être redémarré s'il a changé.
 
-| Variable             | Default                                                        | Meaning |
-|----------------------|-----------------------------------------------------------------|---------|
-| `WT_DASH_PORT`        | `8899`                                                          | Port the backend listens on. |
-| `WT_DASH_BIND`        | `100.75.44.109` (same as `WT_DASH_HOSTADDR`, the host's Tailscale IP) | Bind address for `php -S`. |
-| `WT_DASH_UNIT_DIR`    | `$HOME/.config/systemd/user`                                    | Where the systemd unit is written. |
-| `WT_DASH_TRAEFIK`     | `configuration/traefik2/config/dynamic_conf.local.yaml`         | Traefik dynamic config file to patch. |
-| `WT_DASH_HOSTADDR`    | `100.75.44.109` (Tailscale IP of the host)                      | Address Traefik uses to reach the backend — **must be reachable from the Traefik container**, see below. |
-| `WT_DASH_BASICAUTH`   | `admin:$apr1$placeholder` (a **placeholder**, will not authenticate) | htpasswd-format `user:hash` entry for the Traefik basicauth middleware. **Generate a real one before going live** — see below. |
-| `WT_DASH_RELOAD`      | unset                                                           | Set to `true` to skip the `systemctl --user daemon-reload` / `enable --now` calls (used by the test suite; leave unset for a real install). |
+## Bascule depuis l'ancien dashboard (à faire avec Simon)
 
-**Security note:** never set `WT_DASH_BIND=0.0.0.0` (or any other public-facing
-address) on a host with a public IP and no host firewall — the backend API is
-unauthenticated (basicauth is enforced only by the Traefik route at
-`worktree.docker.test`, not by `php -S` itself), so binding it publicly would
-expose the info-leaking `GET /api/metrics` directly on `<public-ip>:8899` to anyone on the internet.
+1. `systemctl --user disable --now wt-dashboard.service` et suppression de son unité.
+2. `make console-deploy` (unités + secret `console.htpasswd`).
+3. Route Traefik, dans `configuration/traefik2/config/dynamic_conf.local.yaml` : renommer
+   `wt-dashboard` en `console`, `Host(worktree.docker.test)` en `Host(console.docker.test)`, et
+   faire pointer le middleware sur `/etc/certs/console.htpasswd`. **La route NOWIA du même
+   fichier référence le même secret** : mettre à jour les deux références dans la même
+   opération, puis commiter ce fichier (aujourd'hui modifié hors git).
+4. `docker restart infra_traefik`.
+5. Vérifier : 401 sans authentification, 200 avec, et `/api/snapshot` qui renvoie les sections.
 
-Backend-only variables (read by the PHP side, not the installer):
+## Sécurité
 
-| Variable          | Default                              | Meaning |
-|-------------------|---------------------------------------|---------|
-| `WT_METRICS_BIN`  | `<repo>/bin/wt-metrics`               | Collector binary the API shells out to. |
-| `WT_DASH_CACHE`   | `<tmp>/wt-dash-metrics.json`           | Metrics cache file (~2s TTL, avoids re-shelling on every poll). |
-
-## Manual bring-up on the VPS
-
-The installer writes the systemd unit and the Traefik route, but three things need a
-human before the dashboard is safely reachable over Tailscale + basicauth:
-
-**1. Generate a real basicauth credential.** The default (`admin:$apr1$placeholder`)
-is a placeholder and will never authenticate. Generate a real htpasswd-format entry
-and pass it via `WT_DASH_BASICAUTH` when installing:
-
-```bash
-htpasswd -nB admin
-# New password: ********
-# admin:$2y$05$....................................................
-WT_DASH_BASICAUTH='admin:$2y$05$....................................................' bin/wt-dash-install
-```
-
-(Escape any `$` if you paste the hash into a shell variable rather than passing it
-inline — `$$` in a literal use, or single-quote the whole assignment as above.)
-
-**2. Confirm `WT_DASH_HOSTADDR` is reachable from the Traefik container.** The
-default is the host's Tailscale IP (`100.75.44.109`), which is usually right, but
-network topology varies — verify it actually resolves from inside the `traefik`
-container before trusting it:
-
-```bash
-docker exec infra_traefik wget -qO- http://100.75.44.109:8899/api/metrics | head
-```
-
-If that hangs or errors, find the address Traefik can actually reach the host on
-(e.g. the docker bridge gateway) and re-run the installer with
-`WT_DASH_HOSTADDR=<that address>`.
-
-**3. Enable and start the service, then open the dashboard:**
-
-```bash
-bin/wt-dash-install                       # writes the unit + Traefik block
-systemctl --user enable --now wt-dashboard
-systemctl --user status wt-dashboard      # confirm it's running
-```
-
-Then open `https://worktree.docker.test` — reachable only over Tailscale, and gated
-by the basicauth credential from step 1.
-
-Note: the systemd unit has no explicit ordering against `tailscaled` — if the
-service starts before the Tailscale IP is up, `php -S` fails to bind and the unit
-self-heals via `Restart=on-failure` (retrying until the address exists), so no boot
-ordering fix has been made.
-
-**4. Uninstall when done experimenting:**
-
-```bash
-bin/wt-dash-install --uninstall
-```
-
-### Caveat: duplicate top-level `http:` key
-
-`bin/wt-dash-install` appends a marker-delimited `http:` block to
-`configuration/traefik2/config/dynamic_conf.local.yaml`. YAML files are only allowed
-one top-level `http:` key. If another tool later appends its *own* file-provider
-block with a second top-level `http:` key to the same file, only one of the two
-`http:` mappings survives parsing (whichever the YAML parser keeps on key collision)
-and the other tool's routers/services/middlewares silently vanish from Traefik's
-view. If you introduce another generator that touches this file, either merge its
-routers under the same single `http:` key, or point it at a separate dynamic-config
-file instead.
-
-## Modèle de config (depuis la refonte deploy)
-
-La **route Traefik est committée** dans `configuration/traefik2/config/dynamic_conf.local.yaml`
-(routeur + service + middleware `basicAuth.usersFile`). `bin/wt-dash-install` **ne
-touche plus ce fichier** : il ne gère que (1) l'unit `systemd --user` et (2) le
-**secret** basic-auth `configuration/traefik2/certs/wt-dashboard.htpasswd` — un fichier
-gitignored, déjà bind-monté dans Traefik à `/etc/certs`. L'arbre de travail reste donc
-propre après déploiement, et aucun `docker restart infra_traefik` n'est requis pour un
-(ré)install (le secret est relu par Traefik ; seul un changement de la route committée
-nécessite un restart Traefik).
-
-## Déploiement & mise à jour
-
-Sur le **checkout principal** (`/home/webadmin/Project/Infra`, sur `main`) :
-
-```
-make dash-deploy      # git pull --ff-only + (re)génère unit/secret + restart du service
-```
-
-- **Changement de code seul** (UI / collecteur / API) : le service `php -S` sert les
-  fichiers en direct → un simple `git pull` suffit, **sans redémarrage**.
-- **Changement d'infra** (unit, port, secret) : `make dash-deploy` le régénère.
-- **Changement de la route committée** (`dynamic_conf.local.yaml`) : ajouter
-  `docker restart infra_traefik` une fois (Traefik re-bind le fichier).
-
-### Première mise en service (hôte neuf)
-
-```
-cp dashboard/dashboard.env.example dashboard/dashboard.env   # puis renseigner WT_DASH_PASSWORD
-make dash-deploy
-docker restart infra_traefik    # une fois, pour charger la route committée
-```
-
-Accès : `https://worktree.docker.test` (Tailscale + basic-auth), cert auto-signé.
+Ne jamais exposer le service publiquement (`CONSOLE_BIND=0.0.0.0`) : l'authentification est
+assurée par Traefik, pas par `php -S`. L'API ne fait que lire un fichier JSON local, mais elle
+révèle l'état de la machine et des projets.

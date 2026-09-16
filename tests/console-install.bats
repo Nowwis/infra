@@ -41,3 +41,18 @@ setup() {
   [ ! -f "$CONSOLE_UNIT_DIR/console-web.service" ]
   [ ! -f "$CONSOLE_HTPASSWD_FILE" ]
 }
+
+@test "install écrit aussi l'unité du collecteur, relancée en continu" {
+  CONSOLE_PASSWORD=secret run "$INFRA_ROOT/bin/console-install"
+  [ "$status" -eq 0 ]
+  grep -q 'bin/console-collector run' "$CONSOLE_UNIT_DIR/console-collector.service"
+  grep -q 'Restart=always' "$CONSOLE_UNIT_DIR/console-collector.service"
+}
+
+@test "uninstall retire les deux unités" {
+  CONSOLE_PASSWORD=secret "$INFRA_ROOT/bin/console-install"
+  run "$INFRA_ROOT/bin/console-install" --uninstall
+  [ "$status" -eq 0 ]
+  [ ! -f "$CONSOLE_UNIT_DIR/console-web.service" ]
+  [ ! -f "$CONSOLE_UNIT_DIR/console-collector.service" ]
+}

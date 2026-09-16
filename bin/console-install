@@ -7,6 +7,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; ROOT="$(dirname "$HERE")"
 PORT="${CONSOLE_PORT:-8899}"; BIND="${CONSOLE_BIND:-${CONSOLE_HOSTADDR:-100.75.44.109}}"
 UNIT_DIR="${CONSOLE_UNIT_DIR:-$HOME/.config/systemd/user}"
 WEB_UNIT="$UNIT_DIR/console-web.service"
+COLLECTOR_UNIT="$UNIT_DIR/console-collector.service"
 # Le htpasswd vit dans certs/ (gitignored et déjà monté dans Traefik sur /etc/certs).
 HTPASSWD="${CONSOLE_HTPASSWD_FILE:-$ROOT/configuration/traefik2/certs/console.htpasswd}"
 USER_NAME="${CONSOLE_USER:-admin}"
@@ -20,9 +21,10 @@ user_systemctl() {
 
 if [ "${1:-}" = "--uninstall" ]; then
   user_systemctl disable --now console-web.service
-  rm -f "$WEB_UNIT" "$HTPASSWD"
+  user_systemctl disable --now console-collector.service
+  rm -f "$WEB_UNIT" "$COLLECTOR_UNIT" "$HTPASSWD"
   user_systemctl daemon-reload
-  echo "console désinstallée (unité + secret retirés ; la route Traefik versionnée reste dans git)"
+  echo "console désinstallée (unités + secret retirés ; la route Traefik versionnée reste dans git)"
   exit 0
 fi
 
@@ -34,6 +36,20 @@ Description=Console dev (web, lecture seule)
 [Service]
 ExecStart=/usr/bin/php -S ${BIND}:${PORT} -t ${ROOT}/console/public ${ROOT}/console/server/router.php
 Restart=on-failure
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Le collecteur tourne en continu : il alimente l'instantané lu par le service web.
+cat > "$COLLECTOR_UNIT" <<EOF
+[Unit]
+Description=Console dev (collecteur)
+
+[Service]
+ExecStart=${ROOT}/bin/console-collector run
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=default.target
@@ -56,4 +72,5 @@ chmod 600 "$HTPASSWD"
 
 user_systemctl daemon-reload
 user_systemctl enable --now console-web.service
-echo "console installée (port ${PORT} ; secret ${HTPASSWD} ; route versionnée dans dynamic_conf.local.yaml)"
+user_systemctl enable --now console-collector.service
+echo "console installée (web sur le port ${PORT} + collecteur ; secret ${HTPASSWD} ; route versionnée dans dynamic_conf.local.yaml)"

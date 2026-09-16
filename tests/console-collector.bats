@@ -94,11 +94,22 @@ EOF
   [ "$status" -ne 0 ]
 }
 
-@test "run collecte au démarrage puis s'arrête après CONSOLE_RUN_TICKS" {
+@test "run collecte toutes les sections au démarrage puis s'arrête après CONSOLE_RUN_TICKS" {
   stub_df
+  # Isolation : aucune vraie source (projets, docker, processus, systemd, gh).
+  export WORK_CONF="$BATS_TEST_TMPDIR/projects.conf"; : > "$WORK_CONF"
+  export CONSOLE_SESSIONS_DIR="$BATS_TEST_TMPDIR/sessions"; mkdir -p "$CONSOLE_SESSIONS_DIR"
+  local c
+  for c in docker gh systemctl; do printf '#!/bin/bash\nexit 0\n' > "$BIN/$c"; chmod +x "$BIN/$c"; done
+  printf '#!/bin/bash\necho "  1 0 100 /sbin/init"\n' > "$BIN/ps"; chmod +x "$BIN/ps"
+
   CONSOLE_RUN_TICKS=2 run "$C" run
   [ "$status" -eq 0 ]
   jq -e '.data.mem_total_kb == 16000000' "$CONSOLE_STATE/sections/system.json" >/dev/null
   jq -e '.data[0].mount == "/"' "$CONSOLE_STATE/sections/disk.json" >/dev/null
-  jq -e '(.sections | keys) == ["disk", "system"]' "$CONSOLE_STATE/snapshot.json" >/dev/null
+  jq -e '(.sections | has("system")) and (.sections | has("disk"))
+     and (.sections | has("docker")) and (.sections | has("sessions"))
+     and (.sections | has("projects")) and (.sections | has("diagnostics"))
+     and .sections.system.data.mem_total_kb == 16000000
+     and .sections.projects.data == []' "$CONSOLE_STATE/snapshot.json" >/dev/null
 }
