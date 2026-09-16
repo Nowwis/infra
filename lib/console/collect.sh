@@ -31,12 +31,14 @@ console_default_data() { # section → data par défaut quand la source est indi
 
 console_has_section() { [ -f "$CONSOLE_ROOT/lib/console/section_$1.sh" ]; }
 
-# Projets de `work` : [{name, repo}] — sert à rattacher conteneurs et sessions à un projet.
+# Projets de `work` : [{name, repo, forge}] — rattachement des conteneurs et sessions,
+# et choix de la forge pour la section prs.
 console_work_projects() {
   local conf="${WORK_CONF:-$CONSOLE_ROOT/etc/work/projects.conf}"
   [ -f "$conf" ] || { printf '[]'; return 0; }
-  awk -F'|' '!/^#/ && NF >= 5 {printf "%s\t%s\n", $1, $2}' "$conf" \
-    | jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t") | {name: .[0], repo: .[1]})'
+  awk -F'|' '!/^#/ && NF >= 5 {printf "%s\t%s\t%s\n", $1, $2, $5}' "$conf" \
+    | jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t")
+        | {name: .[0], repo: .[1], forge: .[2]})'
 }
 
 console_write_atomic() { # fichier (contenu sur stdin)
