@@ -64,6 +64,19 @@ EOF
     | all(. as $e | ([$s.hooks[$e][]?.hooks[]?.command] | index($h)) != null)' "$WORK_SETTINGS" >/dev/null
 }
 
+@test "le matcher du journal est une vraie regex sur les événements d'outil, absent ailleurs" {
+  # « * » n'est pas une regex valide pour un nom d'outil : le hook n'était jamais appelé.
+  local J="$INFRA_ROOT/bin/console-hook"
+  "$I" >/dev/null
+  jq -e --arg h "$J" '. as $s
+    | (["PreToolUse","PostToolUse"]
+       | all(. as $e | $s.hooks[$e] | map(select([.hooks[].command] | index($h)))
+             | all(.matcher == ".*")))
+      and (["SessionStart","UserPromptSubmit","Notification","Stop","SubagentStop","SessionEnd"]
+       | all(. as $e | $s.hooks[$e] | map(select([.hooks[].command] | index($h)))
+             | all(has("matcher") | not)))' "$WORK_SETTINGS" >/dev/null
+}
+
 @test "install reste idempotent avec le hook de journal" {
   local J="$INFRA_ROOT/bin/console-hook"
   "$I" >/dev/null
