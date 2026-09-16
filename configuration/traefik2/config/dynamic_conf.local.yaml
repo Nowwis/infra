@@ -13,7 +13,6 @@ http:
       rule: "Host(`console.docker.test`)"
       entrypoints: [websecure]
       service: console
-      middlewares: [console-auth]
       tls: {}
     nowia-app:
       rule: "Host(`nowia.docker.test`)"
@@ -30,11 +29,9 @@ http:
         servers:
           - url: "http://100.75.44.109:8811"
   middlewares:
-    console-auth:
-      basicAuth:
-        usersFile: "/etc/certs/console.htpasswd"
-    # Défini mais non référencé par le routeur nowia-app : NOWIA est aujourd'hui
-    # accessible sans authentification à qui est sur Tailscale.
+    # Aucun middleware d'authentification n'est référencé : Traefik n'écoute que sur l'IP
+    # Tailscale (100.75.44.109), donc console et NOWIA sont hors d'atteinte depuis Internet.
+    # Le htpasswd reste en place (certs/console.htpasswd) si on veut réactiver un basicAuth.
     nowia-app-auth:
       basicAuth:
         usersFile: "/etc/certs/console.htpasswd"
