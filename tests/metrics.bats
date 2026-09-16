@@ -1,5 +1,5 @@
 load helpers
-setup() { setup_wt; M="$WT_ROOT/bin/wt-metrics"; }
+setup() { setup_infra; M="$INFRA_ROOT/bin/wt-metrics"; }
 @test "system emits valid JSON with numeric mem/swap/ncpu" {
   run "$M" system
   [ "$status" -eq 0 ]

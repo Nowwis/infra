@@ -1,8 +1,8 @@
 source "$BATS_TEST_DIRNAME/helpers.bash"
 
 setup_work() {
-  setup_wt
-  export WORK_ROOT="$WT_ROOT"
+  setup_infra
+  export WORK_ROOT="$INFRA_ROOT"
   export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
   export GIT_CONFIG_GLOBAL="$BATS_TEST_TMPDIR/gitconfig"
   printf '[init]\n\tdefaultBranch = main\n[advice]\n\tdetachedHead = false\n' > "$GIT_CONFIG_GLOBAL"

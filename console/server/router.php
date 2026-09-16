@@ -19,7 +19,7 @@ if ($method === 'GET' && $uri === '/api/metrics.csv') {
     return true;
 }
 
-// Static file serving from dashboard/public, guarded against path traversal.
+// Static file serving from console/public, guarded against path traversal.
 $publicDir = realpath(dirname(__DIR__) . '/public');
 if ($publicDir === false) {
     http_response_code(404);

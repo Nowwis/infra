@@ -1,5 +1,5 @@
 load helpers
-setup() { setup_wt; P="$WT_ROOT/dashboard/public"; }
+setup() { setup_infra; P="$INFRA_ROOT/console/public"; }
 @test "index.html loads app.js and style.css and has section containers" {
   [ -f "$P/index.html" ] && [ -f "$P/app.js" ] && [ -f "$P/style.css" ]
   grep -q 'app.js' "$P/index.html"; grep -q 'style.css' "$P/index.html"

@@ -1,6 +1,6 @@
 load helpers
 setup() {
-  setup_wt; M="$WT_ROOT/bin/wt-metrics"
+  setup_infra; M="$INFRA_ROOT/bin/wt-metrics"
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
   # stub docker: `docker stats --no-stream --format {{json .}}` then `docker ps` label lookup
   cat > "$BIN/docker" <<'EOF'

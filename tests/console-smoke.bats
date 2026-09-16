@@ -1,11 +1,11 @@
 load helpers
 setup() {
-  setup_wt
+  setup_infra
   command -v php >/dev/null || skip "php not installed"
 }
 
 @test "wt-metrics all is valid JSON with all sections" {
-  run "$WT_ROOT/bin/wt-metrics" all
+  run "$INFRA_ROOT/bin/wt-metrics" all
   [ "$status" -eq 0 ]
   echo "$output" | jq -e 'has("system") and has("docker") and has("sessions") and has("disk") and (has("worktrees")|not)' >/dev/null
 }
@@ -13,7 +13,7 @@ setup() {
 @test "router serves index.html for /" {
   # boot php -S on an ephemeral port, curl /, then kill it
   PORT=8912
-  php -S 127.0.0.1:$PORT -t "$WT_ROOT/dashboard/public" "$WT_ROOT/dashboard/server/router.php" >/dev/null 2>&1 &
+  php -S 127.0.0.1:$PORT -t "$INFRA_ROOT/console/public" "$INFRA_ROOT/console/server/router.php" >/dev/null 2>&1 &
   pid=$!
   sleep 1
   run curl -s "http://127.0.0.1:$PORT/"

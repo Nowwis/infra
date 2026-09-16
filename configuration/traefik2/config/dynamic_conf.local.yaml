@@ -15,12 +15,24 @@ http:
       service: wt-dashboard
       middlewares: [wt-dashboard-auth]
       tls: {}
+    nowia-app:
+      rule: "Host(`nowia.docker.test`)"
+      entrypoints: [websecure]
+      service: nowia-app
+      tls: {}
   services:
     wt-dashboard:
       loadBalancer:
         servers:
           - url: "http://100.75.44.109:8899"
+    nowia-app:
+      loadBalancer:
+        servers:
+          - url: "http://100.75.44.109:8811"
   middlewares:
     wt-dashboard-auth:
+      basicAuth:
+        usersFile: "/etc/certs/wt-dashboard.htpasswd"
+    nowia-app-auth:
       basicAuth:
         usersFile: "/etc/certs/wt-dashboard.htpasswd"
