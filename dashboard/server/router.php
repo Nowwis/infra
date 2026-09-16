@@ -19,15 +19,6 @@ if ($method === 'GET' && $uri === '/api/metrics.csv') {
     return true;
 }
 
-if ($method === 'POST' && preg_match('#^/api/worktrees/([^/]+)/destroy$#', $uri, $m)) {
-    // destroy.php is created in Task 4; the require lives inside this branch
-    // so it never runs (and can't break) plain metrics/static requests.
-    require __DIR__ . '/destroy.php';
-    header('Content-Type: application/json');
-    echo wt_api_destroy($m[1]);
-    return true;
-}
-
 // Static file serving from dashboard/public, guarded against path traversal.
 $publicDir = realpath(dirname(__DIR__) . '/public');
 if ($publicDir === false) {

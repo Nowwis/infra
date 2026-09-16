@@ -1,20 +1,18 @@
 # Dashboard `worktree.docker.test`
 
-A small web dashboard for observing and lightly steering the worktree host: system
-load, running docker containers, worktree environments, active Claude sessions, and
-disk usage — plus a couple of safe actions. It is a **client** of the `wt` engine
-(no duplicated logic): it reads what `wt list --json`, `docker stats`, and the host
-already know, and shells out to `wt destroy` for the one mutating action.
+A small read-only web dashboard for observing the VPS: system load, running docker
+containers, active Claude sessions, and disk usage. It reads what `docker stats`
+and the host already know. Worktrees were removed on 2026-09-15; this dashboard is
+replaced by the console (see `docs/2026-09-15-work-console-design.md`, lot 3).
 
 ## What it shows
 
-`bin/wt-metrics all` aggregates five sections, each fail-safe (a section degrades to
+`bin/wt-metrics all` aggregates four sections, each fail-safe (a section degrades to
 `{}`/`[]` if its underlying command is unavailable or fails — it never breaks the
 others):
 
 - **system** — RAM/swap usage, load average, core count, CPU pressure (PSI).
 - **docker** — running containers: name, compose project, CPU %, memory.
-- **worktrees** — `wt list --json` entries enriched with on-disk size (`du -sb`).
 - **sessions** — Claude Code processes on the host: pid, kind (`claude` /
   `remote-control` / `sdk-backend`), model, RSS, CPU %, age.
 - **disk** — `df` per mount point (size/used/available/use %).
@@ -24,18 +22,10 @@ gauges for `system`, tables for the rest, plus small in-memory sparklines (never
 persisted, never sent anywhere). `GET /api/metrics.csv` exports the same data
 flattened as CSV (the "Export CSV" button in the top bar).
 
-## Safe actions
+## Actions
 
-- **Destroy a worktree** — the "Supprimer" button on a worktree row asks for
-  confirmation, then `POST /api/worktrees/{project}/destroy`. The backend looks
-  `{project}` up in `wt list --json`; unknown projects are refused (404) without
-  ever passing the caller-supplied value to a shell. Only the registry-resolved
-  `app`/`slug` are passed to `wt destroy … --yes`.
-- **Open an app** — the "Ouvrir" link on a worktree row opens its app URL
-  (`https://<app>-<slug>.docker.test`) in a new tab. Read-only, no backend call.
-
-There is no way to stop/kill a session or a docker stack from the UI (v2), and no
-metric history beyond the in-memory sparklines (v2).
+None: the dashboard is strictly read-only. There is no way to stop a session or a
+docker stack from the UI, and no metric history beyond the in-memory sparklines.
 
 ## Prerequisites
 
@@ -44,8 +34,6 @@ metric history beyond the in-memory sparklines (v2).
 - `jq` — used by `bin/wt-metrics` to shape every collector's JSON output.
 - `docker` — used for the `docker` section (`docker stats --no-stream`); the section
   degrades to `[]` if docker is not available.
-- `wt` (this repo's `bin/wt`) — used for the `worktrees` section and for the destroy
-  action.
 
 ## Install / uninstall
 
@@ -74,8 +62,7 @@ Environment variables the installer honors (all optional, with sane defaults):
 address) on a host with a public IP and no host firewall — the backend API is
 unauthenticated (basicauth is enforced only by the Traefik route at
 `worktree.docker.test`, not by `php -S` itself), so binding it publicly would
-expose `POST /api/worktrees/{project}/destroy` and the info-leaking
-`GET /api/metrics` directly on `<public-ip>:8899` to anyone on the internet.
+expose the info-leaking `GET /api/metrics` directly on `<public-ip>:8899` to anyone on the internet.
 
 Backend-only variables (read by the PHP side, not the installer):
 
@@ -83,7 +70,6 @@ Backend-only variables (read by the PHP side, not the installer):
 |-------------------|---------------------------------------|---------|
 | `WT_METRICS_BIN`  | `<repo>/bin/wt-metrics`               | Collector binary the API shells out to. |
 | `WT_DASH_CACHE`   | `<tmp>/wt-dash-metrics.json`           | Metrics cache file (~2s TTL, avoids re-shelling on every poll). |
-| `WT_DASH_WT`      | `<repo>/bin/wt`                       | `wt` binary used by the destroy endpoint. |
 
 ## Manual bring-up on the VPS
 

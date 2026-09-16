@@ -108,20 +108,6 @@ main{max-width:1400px;margin:0 auto;padding:18px 20px 40px}
 .tag.rc{color:var(--accent-ink);background:color-mix(in srgb,var(--accent) 14%,transparent)}
 .tag.sdk{color:var(--warn);background:var(--warn-bg)}
 
-/* Worktrees */
-.wt{padding:12px 16px;border-bottom:1px solid var(--border)}
-.wt:last-child{border-bottom:0}
-.wt-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.wt-name{font-weight:600}
-.wt-dom{font:500 12px/1 var(--mono);color:var(--muted)}
-.wt-actions{margin-left:auto;display:flex;gap:8px}
-.btn{font:500 12.5px/1 var(--sans);padding:6px 11px;border-radius:var(--radius-sm);
-  border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer}
-.btn:hover{border-color:var(--accent);color:var(--accent)}
-.btn.danger:hover{border-color:var(--crit);color:var(--crit);background:var(--crit-bg)}
-.wt-sub{margin-top:6px;color:var(--muted);font:500 12px/1.4 var(--mono);
-  display:flex;gap:14px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
-
 /* Disque */
 .disk-row{padding:11px 16px;border-bottom:1px solid var(--border)}
 .disk-row:last-child{border-bottom:0}
