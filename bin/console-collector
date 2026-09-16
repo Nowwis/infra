@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# console-collector — collecte les sections de la console à cadences différenciées.
+#   console-collector run              boucle de collecte (unité systemd console-collector)
+#   console-collector once <section>   calcule, écrit et affiche une section
+#   console-collector assemble         écrit et affiche snapshot.json
+# Voir docs/2026-09-15-work-console-design.md §5.2.
+set -uo pipefail
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+CONSOLE_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+export CONSOLE_ROOT
+source "$CONSOLE_ROOT/lib/console/collect.sh"
+
+usage() { sed -n '2,5p' "$SELF" >&2; }
+
+case "${1:-}" in
+  once)     console_once "${2:-}" ;;
+  assemble) console_assemble ;;
+  run)      console_run ;;
+  -h|--help) usage ;;
+  *)        usage; exit 2 ;;
+esac

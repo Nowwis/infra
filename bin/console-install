@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# console-install [--uninstall] — unité systemd --user de la console (php -S … console/server/router.php)
+# et secret basic-auth Traefik (ligne htpasswd). La route Traefik est versionnée dans
+# configuration/traefik2/config/dynamic_conf.local.yaml : ce script n'y touche jamais.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; ROOT="$(dirname "$HERE")"
+PORT="${CONSOLE_PORT:-8899}"; BIND="${CONSOLE_BIND:-${CONSOLE_HOSTADDR:-100.75.44.109}}"
+UNIT_DIR="${CONSOLE_UNIT_DIR:-$HOME/.config/systemd/user}"
+WEB_UNIT="$UNIT_DIR/console-web.service"
+COLLECTOR_UNIT="$UNIT_DIR/console-collector.service"
+# Le htpasswd vit dans certs/ (gitignored et déjà monté dans Traefik sur /etc/certs).
+HTPASSWD="${CONSOLE_HTPASSWD_FILE:-$ROOT/configuration/traefik2/certs/console.htpasswd}"
+USER_NAME="${CONSOLE_USER:-admin}"
+
+# systemctl --user, sauf en test (CONSOLE_RELOAD=true) ou sans systemd.
+user_systemctl() {
+  [ "${CONSOLE_RELOAD:-}" = "true" ] && return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+  systemctl --user "$@" 2>/dev/null || true
+}
+
+if [ "${1:-}" = "--uninstall" ]; then
+  user_systemctl disable --now console-web.service
+  user_systemctl disable --now console-collector.service
+  rm -f "$WEB_UNIT" "$COLLECTOR_UNIT" "$HTPASSWD"
+  user_systemctl daemon-reload
+  echo "console désinstallée (unités + secret retirés ; la route Traefik versionnée reste dans git)"
+  exit 0
+fi
+
+mkdir -p "$UNIT_DIR"
+cat > "$WEB_UNIT" <<EOF
+[Unit]
+Description=Console dev (web, lecture seule)
+
+[Service]
+ExecStart=/usr/bin/php -S ${BIND}:${PORT} -t ${ROOT}/console/public ${ROOT}/console/server/router.php
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Le collecteur tourne en continu : il alimente l'instantané lu par le service web.
+cat > "$COLLECTOR_UNIT" <<EOF
+[Unit]
+Description=Console dev (collecteur)
+
+[Service]
+ExecStart=${ROOT}/bin/console-collector run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Secret : CONSOLE_HTPASSWD (déjà hashé) > CONSOLE_PASSWORD (en clair, premier install seulement).
+# Un secret existant est conservé ; rotation via CONSOLE_HTPASSWD ou suppression du fichier.
+mkdir -p "$(dirname "$HTPASSWD")"
+if [ -n "${CONSOLE_HTPASSWD:-}" ]; then
+  printf '%s\n' "$CONSOLE_HTPASSWD" > "$HTPASSWD"
+elif [ ! -s "$HTPASSWD" ]; then
+  if [ -n "${CONSOLE_PASSWORD:-}" ]; then
+    printf '%s:%s\n' "$USER_NAME" "$(openssl passwd -apr1 "$CONSOLE_PASSWORD")" > "$HTPASSWD"
+  else
+    echo "console-install : aucun secret. Renseigner CONSOLE_PASSWORD (ou CONSOLE_HTPASSWD) — voir console/console.env.example" >&2
+    exit 1
+  fi
+fi
+chmod 600 "$HTPASSWD"
+
+user_systemctl daemon-reload
+user_systemctl enable --now console-web.service
+user_systemctl enable --now console-collector.service
+echo "console installée (web sur le port ${PORT} + collecteur ; secret ${HTPASSWD} ; route versionnée dans dynamic_conf.local.yaml)"

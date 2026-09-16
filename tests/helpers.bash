@@ -1,6 +1,5 @@
-setup_wt() {
-  export WT_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-  PATH="$WT_ROOT/bin:$PATH"
-  export WT_STATE="$BATS_TEST_TMPDIR/state"
+setup_infra() {
+  export INFRA_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+  PATH="$INFRA_ROOT/bin:$PATH"
   export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"
 }

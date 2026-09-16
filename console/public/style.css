@@ -116,3 +116,24 @@ main{max-width:1400px;margin:0 auto;padding:18px 20px 40px}
 .disk-top .figs{font:500 12px/1 var(--mono);color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
 
 .hidden{display:none !important}
+
+/* Diagnostics */
+.diag{padding:11px 16px;border-bottom:1px solid var(--border)}
+.diag:last-child{border-bottom:0}
+.diag-top{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.diag-title{font-weight:600}
+.diag-detail{margin-top:4px;color:var(--muted);font:500 12.5px/1.4 var(--mono)}
+.diag-action{margin-top:3px;color:var(--faint);font-size:12.5px}
+.diag.lvl-warn .diag-title{color:var(--warn)}
+.diag.lvl-crit .diag-title{color:var(--crit)}
+.tag.warn{color:var(--warn);background:var(--warn-bg)}
+.tag.crit{color:var(--crit);background:var(--crit-bg)}
+
+/* Projets */
+.proj{padding:11px 16px;border-bottom:1px solid var(--border)}
+.proj:last-child{border-bottom:0}
+.proj-top{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.proj-name{font-weight:600}
+.proj-sub{margin-top:5px;color:var(--muted);font:500 12px/1.5 var(--mono)}
+.row.off .r-name{color:var(--faint)}
+.status.stale .dot{background:var(--warn)}

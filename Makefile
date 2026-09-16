@@ -1,4 +1,4 @@
-.PHONY: help up down dash-deploy
+.PHONY: help up down console-deploy
 
 up:
 	docker compose up -d
@@ -6,11 +6,11 @@ up:
 down:
 	docker compose down
 
-# Déploie le dashboard depuis la source (à lancer sur le checkout principal, sur main) :
-# récupère main, (re)génère l'unit systemd + le secret basic-auth, redémarre le service.
-# Le service sert les fichiers en direct -> une MAJ code (UI/collecteur) ne nécessite que le pull.
-dash-deploy:
+# Déploie la console depuis la source (checkout principal, sur main) :
+# récupère main, (re)génère les unités systemd + le secret basic-auth, redémarre les services.
+# Le service web sert les fichiers en direct -> une MAJ de l'UI ne nécessite que le pull.
+console-deploy:
 	git pull --ff-only
-	set -a; [ -f dashboard/dashboard.env ] && . ./dashboard/dashboard.env; set +a; bin/wt-dash-install
-	-systemctl --user restart wt-dashboard.service
+	set -a; [ -f console/console.env ] && . ./console/console.env; set +a; bin/console-install
+	-systemctl --user restart console-web.service
 	@echo "OK. Si la route Traefik (dynamic_conf.local.yaml) a changé dans ce pull, applique-la : docker restart infra_traefik"
