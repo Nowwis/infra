@@ -58,7 +58,9 @@ strip | jq --arg g "$GUARD" --arg s "$SESSION" --arg j "$JOURNAL" --arg m "$MATC
   | .hooks.PreToolUse = ((.hooks.PreToolUse // []) + [{matcher: $m, hooks: [{type: "command", command: $g, timeout: 10}]}])
   | .hooks.SessionStart = ((.hooks.SessionStart // []) + [{matcher: "*", hooks: [{type: "command", command: $s, timeout: 10}]}])
   | reduce $events[] as $ev (.;
-      .hooks[$ev] = ((.hooks[$ev] // []) + [{matcher: "*", hooks: [{type: "command", command: $j, timeout: 5}]}]))' \
+      .hooks[$ev] = ((.hooks[$ev] // [])
+        + [ (if ($ev | test("ToolUse")) then {matcher: ".*"} else {} end)
+            + {hooks: [{type: "command", command: $j, timeout: 5}]} ]))' \
   | replace_settings
 if [ ! -e "$SKILLS_DIR/work" ] && [ ! -L "$SKILLS_DIR/work" ]; then ln -s "$SKILL_SRC" "$SKILLS_DIR/work"; fi
 echo "work : garde d'écriture, rappel SessionStart et journal d'activité installés dans $SETTINGS ; skill lié dans $SKILLS_DIR/work"
