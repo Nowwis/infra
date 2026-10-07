@@ -5,6 +5,10 @@ tls:
     - certFile: /etc/certs/docker.localhost.pem
       keyFile: /etc/certs/docker.localhost-key.pem
 
+# Les routes propres à UN hôte (un service local, une console…) vont dans un fichier
+# `99-host.yaml` de ce même dossier : il est ignoré par git (.gitignore) et rechargé à chaud
+# comme les autres. Rien de spécifique à une machine ne doit entrer dans ce dépôt.
+
 # Exemple : publier un service qui tourne SUR L'HÔTE (pas dans Docker) derrière Traefik.
 # Décommenter et adapter ; l'adresse doit être joignable depuis le conteneur Traefik
 # (IP de l'hôte sur une interface privée, pas 127.0.0.1).

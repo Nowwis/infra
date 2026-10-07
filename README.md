@@ -85,4 +85,4 @@ JSON d'alerte).
 
 ## Licence
 
-À définir avant publication (voir `docs/DECISIONS.md`).
+MIT — voir `LICENSE`.

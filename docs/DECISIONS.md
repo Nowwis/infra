@@ -80,7 +80,7 @@ remplit le disque et expose des détails inutiles.
 
 ## À trancher
 
-- **Licence** du dépôt avant publication.
+- ~~Licence~~ : MIT, tranché le 2026-10-07.
 - **Production des sauvegardes** : le socle fournit le contrôle, pas la sauvegarde. Décider si
   l'outillage de sauvegarde (dump chiffré, rotation, hors site) entre dans ce dépôt sous `ops/`
   ou reste séparé.

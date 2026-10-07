@@ -26,3 +26,6 @@
 
 .idea/
 .superpowers/
+
+# routes et middlewares propres à UN hôte (services hors Docker, console locale…) : non versionnés
+/configuration/traefik2/config/dynamic/*/99-host*.yaml
