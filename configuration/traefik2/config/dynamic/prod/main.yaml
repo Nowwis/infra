@@ -1,0 +1,47 @@
+# Config dynamique PROD. Tout *.yaml de ce dossier est chargé et rechargé à chaud : un
+# `git pull` suffit, aucune recréation de conteneur.
+#
+# Ce fichier ne déclare que des MIDDLEWARES partagés, auxquels chaque application s'attache
+# explicitement par ses labels (`traefik.http.routers.<r>.middlewares=security-headers@file`).
+# Rien n'est attaché à l'entrypoint : un même hôte héberge des sites aux besoins différents
+# (un `X-Frame-Options` ou une `Permissions-Policy` globale casserait une boutique ou une
+# carte interactive). L'opt-in est la règle.
+http:
+  middlewares:
+    # En-têtes de sécurité navigateur pour une application web classique.
+    # Pas de Content-Security-Policy ici : elle demande un nonce par requête, donc elle
+    # relève de l'application, pas du reverse proxy.
+    security-headers:
+      headers:
+        # HSTS par paliers : une erreur est irréversible côté navigateur pendant max-age.
+        # Palier 1 = 300 s. Passer à 31536000 après quelques jours sans incident, puis
+        # includeSubDomains et preload seulement après inventaire de TOUS les sous-domaines
+        # (chacun doit être joignable en HTTPS seul).
+        stsSeconds: 300
+        stsIncludeSubdomains: false
+        stsPreload: false
+        contentTypeNosniff: true
+        # SAMEORIGIN plutôt que DENY : laisse une application afficher ses propres PDF
+        # en <embed> ou ses aperçus en iframe de même origine.
+        customFrameOptionsValue: SAMEORIGIN
+        referrerPolicy: strict-origin-when-cross-origin
+        permissionsPolicy: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), midi=()"
+        customResponseHeaders:
+          Cross-Origin-Opener-Policy: "same-origin"
+
+    # Variante pour un fournisseur d'identité (SSO) qui émet déjà lui-même des en-têtes plus
+    # stricts (X-Frame-Options: DENY, nosniff, Referrer-Policy: same-origin). Les réémettre
+    # depuis Traefik les écraserait : on n'ajoute que ce qui manque.
+    security-headers-idp:
+      headers:
+        stsSeconds: 300
+        stsIncludeSubdomains: false
+        stsPreload: false
+        permissionsPolicy: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), midi=()"
+        customResponseHeaders:
+          Cross-Origin-Opener-Policy: "same-origin"
+
+    # Redirection www → apex, à référencer depuis un routeur `Host(`www.exemple.tld`)`.
+    # Exemple d'usage dans les labels d'une application :
+    #   traefik.http.middlewares.<app>-to-apex.redirectregex.regex=^https?://www\.(.*)
+    #   traefik.http.middlewares.<app>-to-apex.redirectregex.replacement=https://$${1}

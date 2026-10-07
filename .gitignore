@@ -1,0 +1,28 @@
+# secrets et état local — jamais versionnés
+.env
+*.bak
+*.bak-*
+
+# données des moteurs
+/datas/*
+!/datas/.gitkeep
+
+# certificats, journaux, acme
+/configuration/traefik2/certs/*
+!/configuration/traefik2/certs/.gitkeep
+/configuration/traefik2/logs/*
+!/configuration/traefik2/logs/.gitkeep
+/letsencrypt/*
+!/letsencrypt/.gitkeep
+
+# contrôle de restauration : config par hôte, historique, résultats, dumps
+/ops/backup-check/backup.env
+/ops/backup-check/backup.env.*
+!/ops/backup-check/backup.env.example
+/ops/backup-check/.restore-history.csv
+/ops/backup-check/restore-test-result.json
+*.sql
+*.sql.gz
+
+.idea/
+.superpowers/

@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# infra-check — refuse un déploiement incomplet. Lancé par `make check`, `make up`,
+# `make traefik-config` et `make deploy`.
+#
+# Vérifie, dans l'ordre :
+#   1. .env présent, ENV ∈ {local, prod}
+#   2. variables obligatoires non vides (liste selon ENV)
+#   3. aucun `$` seul dans un hash basic-auth (Compose le tronquerait en silence)
+#   4. traefik.<ENV>.yaml et le dossier dynamic/<ENV>/ avec au moins un *.yaml
+#   5. ENV=local : certificat mkcert présent ; ENV=prod : TRAEFIK_DASHBOARD_INSECURE=false
+#   6. réseaux externes traefik, databases, mailer (si docker est disponible)
+#   7. `docker compose config` valide (si docker est disponible)
+#
+# Sortie : 0 tout est bon · 1 au moins un échec (liste complète affichée, pas d'arrêt au premier).
+# Variables : INFRA_ROOT (défaut : dossier parent), INFRA_ENV_FILE (défaut : $INFRA_ROOT/.env),
+# INFRA_SKIP_DOCKER=1 pour ignorer les contrôles 6 et 7 (tests, hôte sans docker).
+set -uo pipefail
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+: "${INFRA_ROOT:=$(cd "$(dirname "$SELF")/.." && pwd)}"
+: "${INFRA_ENV_FILE:=$INFRA_ROOT/.env}"
+: "${INFRA_SKIP_DOCKER:=0}"
+
+fails=0
+ok()   { printf '  ✓ %s\n' "$*"; }
+fail() { printf '  ✗ %s\n' "$*" >&2; fails=$((fails + 1)); }
+
+# --- 1. .env ------------------------------------------------------------------
+if [ ! -f "$INFRA_ENV_FILE" ]; then
+  fail ".env absent ($INFRA_ENV_FILE) — cp .env.example .env puis renseigner"
+  printf 'infra-check : %d échec\n' "$fails" >&2
+  exit 1
+fi
+# Lecture sans exécution : KEY=valeur, commentaires et lignes vides ignorés.
+declare -A ENVV
+while IFS= read -r line; do
+  case "$line" in ''|'#'*) continue ;; esac
+  key="${line%%=*}"; val="${line#*=}"
+  [[ "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]] || continue
+  ENVV["$key"]="$val"
+done < "$INFRA_ENV_FILE"
+v() { printf '%s' "${ENVV[$1]:-}"; }
+
+env="$(v ENV)"
+case "$env" in
+  local|prod) ok "ENV=$env" ;;
+  *) fail "ENV doit valoir local ou prod (actuel : '${env:-vide}')" ;;
+esac
+
+# --- 2. variables obligatoires -----------------------------------------------
+required="ENV MYSQL_ROOT_PASSWORD TRAEFIK_ENTRYPOINT TRAEFIK_PHPMYADMIN_USERS MONITORING_DOMAIN PMA_DOMAIN MAILPIT_DOMAIN"
+[ "$env" = prod ] && required="$required LETSENCRYPT_EMAIL TRAEFIK_CERTRESOLVER TRAEFIK_DASHBOARD_USERS TRAEFIK_MAILPIT_USERS TRAEFIK_MONITORING_MIDDLEWARE TRAEFIK_MAILPIT_MIDDLEWARE"
+for k in $required; do
+  if [ -n "$(v "$k")" ]; then ok "$k renseignée"; else fail "$k vide ou absente"; fi
+done
+case "$(v MYSQL_ROOT_PASSWORD)" in changeme|root|password) fail "MYSQL_ROOT_PASSWORD est une valeur d'exemple" ;; esac
+[ "$env" = prod ] && [ "$(v LETSENCRYPT_EMAIL)" = "you@example.com" ] && fail "LETSENCRYPT_EMAIL est la valeur d'exemple"
+
+# --- 3. hash basic-auth : `$` non doublé --------------------------------------
+for k in TRAEFIK_DASHBOARD_USERS TRAEFIK_MAILPIT_USERS TRAEFIK_PHPMYADMIN_USERS; do
+  h="$(v "$k")"
+  [ -n "$h" ] || continue
+  # Un `$` suivi d'autre chose qu'un `$`, ou un `$` final, sera interprété par Compose.
+  stripped="${h//\$\$/}"
+  if [[ "$stripped" == *'$'* ]]; then
+    fail "$k contient un \$ non doublé : Compose tronquera le hash (écrire \$\$, voir .env.example)"
+  else
+    ok "$k : hash sans \$ nu"
+  fi
+done
+
+# --- 4. config Traefik de l'ENV -----------------------------------------------
+cfg="$INFRA_ROOT/configuration/traefik2/config"
+if [ -n "$env" ]; then
+  [ -f "$cfg/traefik.$env.yaml" ] && ok "traefik.$env.yaml présent" || fail "traefik.$env.yaml absent dans $cfg"
+  if [ -d "$cfg/dynamic/$env" ]; then
+    if ls "$cfg/dynamic/$env"/*.yaml >/dev/null 2>&1; then ok "dynamic/$env/ contient au moins un .yaml"
+    else fail "dynamic/$env/ est vide : Traefik n'aurait aucun middleware ni certificat"; fi
+  else
+    fail "dossier dynamic/$env/ absent (c'est un DOSSIER qui est monté, pas un fichier)"
+  fi
+fi
+
+# --- 5. spécifiques à l'ENV ---------------------------------------------------
+if [ "$env" = local ]; then
+  certs="$INFRA_ROOT/configuration/traefik2/certs"
+  if [ -f "$certs/docker.localhost.pem" ] && [ -f "$certs/docker.localhost-key.pem" ]; then ok "certificat mkcert présent"
+  else fail "certificat mkcert absent (make certs)"; fi
+fi
+if [ "$env" = prod ]; then
+  [ "$(v TRAEFIK_DASHBOARD_INSECURE)" = false ] && ok "tableau de bord non insecure" \
+    || fail "TRAEFIK_DASHBOARD_INSECURE doit être false en prod"
+  [ -n "$(v TRAEFIK_BIND)" ] && printf '  i TRAEFIK_BIND=%s : écoute restreinte sur un serveur prod, voulu ?\n' "$(v TRAEFIK_BIND)"
+fi
+
+# --- 6 & 7. docker -------------------------------------------------------------
+if [ "$INFRA_SKIP_DOCKER" != 1 ] && command -v docker >/dev/null 2>&1; then
+  for n in traefik databases mailer; do
+    docker network inspect "$n" >/dev/null 2>&1 && ok "réseau $n présent" || fail "réseau $n absent (make networks)"
+  done
+  if (cd "$INFRA_ROOT" && docker compose config -q 2>/tmp/infra-check.$$); then ok "docker compose config valide"
+  else fail "docker compose config : $(tr '\n' ' ' < /tmp/infra-check.$$ | cut -c1-200)"; fi
+  rm -f /tmp/infra-check.$$
+else
+  printf '  i contrôles docker ignorés\n'
+fi
+
+if [ "$fails" -gt 0 ]; then
+  printf 'infra-check : %d échec(s) — ne pas déployer\n' "$fails" >&2
+  exit 1
+fi
+printf 'infra-check : OK (%s)\n' "$env"

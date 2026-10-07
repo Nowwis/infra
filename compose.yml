@@ -1,0 +1,131 @@
+# Socle d'hébergement partagé : un reverse proxy, une base par moteur, un capteur de mails,
+# une console SQL. Les applications ne déclarent que leurs propres services et rejoignent
+# les réseaux externes `traefik`, `databases`, `mailer` (voir docs/CONTRACT.md).
+#
+# Un seul fichier pour tous les hôtes : ce qui varie est dans `.env` (ENV, domaines, secrets)
+# et dans configuration/traefik2/config/{traefik.<ENV>.yaml,dynamic/<ENV>/}.
+
+services:
+  reverse-proxy:
+    image: traefik:v2.11
+    container_name: infra_traefik
+    restart: always
+    environment:
+      - DOCKER_API_VERSION=1.51
+    command:
+      - --certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}
+      - --api.dashboard=true
+      - --api.insecure=${TRAEFIK_DASHBOARD_INSECURE}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.monitoring.tls=true"
+      - "traefik.http.routers.monitoring.rule=Host(`${MONITORING_DOMAIN}`)"
+      - "traefik.http.routers.monitoring.entrypoints=${TRAEFIK_ENTRYPOINT}"
+      - "traefik.http.routers.monitoring.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
+      - "traefik.http.routers.monitoring.service=api@internal"
+      - "traefik.http.routers.monitoring.middlewares=${TRAEFIK_MONITORING_MIDDLEWARE}"
+      - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_DASHBOARD_USERS}"
+    ports:
+      # TRAEFIK_BIND vide = toutes les interfaces ; "127.0.0.1:" ou "<ip>:" pour restreindre.
+      - "${TRAEFIK_BIND}80:80"
+      - "${TRAEFIK_BIND}443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+      - ./configuration/traefik2/config/traefik.${ENV}.yaml:/etc/traefik/traefik.yaml:ro
+      # Config dynamique : on monte le DOSSIER, jamais un fichier. Un bind mount de fichier
+      # est résolu une fois pour toutes à la création du conteneur ; `git pull` écrit un
+      # temporaire puis le renomme (nouvel inode) et le conteneur continue de lire l'ancien
+      # contenu : les middlewares disparaissent, les routeurs qui les référencent sont
+      # supprimés, tous les sites tombent en 404. Le dossier rend le rechargement à chaud réel.
+      - ./configuration/traefik2/config/dynamic/${ENV}:/etc/traefik/dynamic:ro
+      - ./configuration/traefik2/logs/:/logs/
+      - ./configuration/traefik2/certs:/etc/certs:ro
+    networks:
+      - traefik
+
+  mysql:
+    image: mysql:8.0
+    container_name: infra_mysql_8_0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - ./datas/mysql_8_0/datas:/var/lib/mysql
+      - ./datas/mysql_8_0/files:/var/lib/mysql-files
+      - ./configuration/mysql_8_0/conf.d:/etc/mysql/conf.d:ro
+    networks:
+      - databases
+
+  # Second moteur, pour les applications dont la production tourne en MariaDB : la parité de
+  # moteur compte (Doctrine, collations, JSON). Démarré seulement avec `--profile mariadb`
+  # (make up PROFILES=mariadb) : il n'a pas vocation à exister sur tous les hôtes.
+  mariadb:
+    image: mariadb:11.3.2
+    container_name: infra_mariadb_11_3
+    restart: always
+    profiles: [mariadb]
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - ./datas/mariadb_11_3/datas:/var/lib/mysql
+    networks:
+      - databases
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: infra_phpmyadmin
+    restart: always
+    environment:
+      # Les deux moteurs sont proposés ; l'entrée MariaDB n'est joignable que si le profil tourne.
+      - PMA_HOSTS=infra_mysql_8_0,infra_mariadb_11_3
+      - PMA_VERBOSES=MySQL 8.0,MariaDB 11.3.2
+      - UPLOAD_LIMIT=${PMA_UPLOAD_LIMIT:-512M}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.phpmyadmin.rule=Host(`${PMA_DOMAIN}`)"
+      - "traefik.http.routers.phpmyadmin.tls=true"
+      - "traefik.http.routers.phpmyadmin.entrypoints=${TRAEFIK_ENTRYPOINT}"
+      - "traefik.http.routers.phpmyadmin.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
+      - "traefik.http.services.phpmyadmin.loadbalancer.server.port=80"
+      # Identifiants PROPRES à phpMyAdmin : il ouvre toutes les bases de l'hôte, il ne
+      # partage pas le mot de passe du tableau de bord. Variable vide = middleware invalide =
+      # routeur supprimé = 404 : un outil d'administration échoue fermé, jamais ouvert.
+      # Corollaire : TRAEFIK_PHPMYADMIN_USERS doit être posée AVANT le déploiement (make check).
+      - "traefik.http.routers.phpmyadmin.middlewares=phpmyadmin-auth"
+      - "traefik.http.middlewares.phpmyadmin-auth.basicauth.users=${TRAEFIK_PHPMYADMIN_USERS}"
+      - "traefik.docker.network=traefik"
+    networks:
+      - traefik
+      - databases
+
+  mailer:
+    image: axllent/mailpit
+    container_name: infra_mailer
+    restart: always
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailpit.rule=Host(`${MAILPIT_DOMAIN}`)"
+      - "traefik.http.routers.mailpit.tls=true"
+      - "traefik.http.routers.mailpit.entrypoints=${TRAEFIK_ENTRYPOINT}"
+      - "traefik.http.routers.mailpit.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
+      - "traefik.http.services.mailpit.loadbalancer.server.port=8025"
+      - "traefik.http.routers.mailpit.middlewares=${TRAEFIK_MAILPIT_MIDDLEWARE}"
+      - "traefik.http.middlewares.mailpit-auth.basicauth.users=${TRAEFIK_MAILPIT_USERS}"
+      - "traefik.docker.network=traefik"
+    networks:
+      - traefik
+      - mailer
+
+# Réseaux créés une fois par hôte (make networks) : ils survivent au `down` du socle et sont
+# rejoints par les applications en `external: true`.
+networks:
+  traefik:
+    external: true
+  databases:
+    external: true
+  mailer:
+    external: true

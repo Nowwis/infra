@@ -1,0 +1,23 @@
+# Config dynamique LOCALE. Tout *.yaml de ce dossier est chargé et rechargé à chaud.
+# Ici : le certificat mkcert qui couvre *.docker.test (généré par `make certs`).
+tls:
+  certificates:
+    - certFile: /etc/certs/docker.localhost.pem
+      keyFile: /etc/certs/docker.localhost-key.pem
+
+# Exemple : publier un service qui tourne SUR L'HÔTE (pas dans Docker) derrière Traefik.
+# Décommenter et adapter ; l'adresse doit être joignable depuis le conteneur Traefik
+# (IP de l'hôte sur une interface privée, pas 127.0.0.1).
+#
+# http:
+#   routers:
+#     mon-service:
+#       rule: "Host(`mon-service.docker.test`)"
+#       entrypoints: [websecure]
+#       service: mon-service
+#       tls: {}
+#   services:
+#     mon-service:
+#       loadBalancer:
+#         servers:
+#           - url: "http://<ip-privée-de-l-hôte>:8080"
