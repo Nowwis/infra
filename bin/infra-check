@@ -52,7 +52,13 @@ required="ENV MYSQL_ROOT_PASSWORD TRAEFIK_ENTRYPOINT TRAEFIK_PHPMYADMIN_USERS MO
 for k in $required; do
   if [ -n "$(v "$k")" ]; then ok "$k renseignée"; else fail "$k vide ou absente"; fi
 done
-case "$(v MYSQL_ROOT_PASSWORD)" in changeme|root|password) fail "MYSQL_ROOT_PASSWORD est une valeur d'exemple" ;; esac
+case "$(v MYSQL_ROOT_PASSWORD)" in
+  changeme|root|password)
+    # Fatal sur un serveur ; toléré (signalé) sur un hôte local qui n'écoute que sur un réseau privé
+    # et dont les applications partagent déjà ce mot de passe.
+    if [ "$env" = prod ]; then fail "MYSQL_ROOT_PASSWORD est une valeur d'exemple"
+    else printf '  i MYSQL_ROOT_PASSWORD est une valeur d exemple (toléré en local, jamais en prod)\n'; fi ;;
+esac
 [ "$env" = prod ] && [ "$(v LETSENCRYPT_EMAIL)" = "you@example.com" ] && fail "LETSENCRYPT_EMAIL est la valeur d'exemple"
 
 # --- 3. hash basic-auth : `$` non doublé --------------------------------------

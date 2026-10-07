@@ -104,12 +104,6 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "mot de passe root d'exemple : échec" {
-  env_local; sed -i 's/^MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=changeme/' "$INFRA_ENV_FILE"
-  run infra-check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"valeur d'exemple"* ]]
-}
 
 @test "prod : LETSENCRYPT_EMAIL d'exemple ou dashboard insecure : échec, les deux listés" {
   env_prod; sed -i 's/^LETSENCRYPT_EMAIL=.*/LETSENCRYPT_EMAIL=you@example.com/; s/^TRAEFIK_DASHBOARD_INSECURE=.*/TRAEFIK_DASHBOARD_INSECURE=true/' "$INFRA_ENV_FILE"
@@ -171,4 +165,18 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"MYSQL_ROOT_PASSWORD vide"* ]]
   [[ "$output" == *"PMA_DOMAIN vide"* ]]
+}
+
+@test "mot de passe root d'exemple : échec en prod" {
+  env_prod; sed -i 's/^MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=changeme/' "$INFRA_ENV_FILE"
+  run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"valeur d'exemple"* ]]
+}
+
+@test "mot de passe root d'exemple : toléré et signalé en local" {
+  env_local; sed -i 's/^MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=root/' "$INFRA_ENV_FILE"
+  run infra-check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"toléré en local"* ]]
 }
