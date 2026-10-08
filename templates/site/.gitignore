@@ -1,0 +1,13 @@
+# Configuration et journaux locaux
+/.docker/.env
+.env.local
+.env.*.local
+
+# Dépendances et caches
+/vendor/
+/node_modules/
+/var/
+
+# IDE
+.idea/
+.vscode/

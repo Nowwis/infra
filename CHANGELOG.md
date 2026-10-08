@@ -6,6 +6,11 @@ requise : nouvelle variable `.env`, `make traefik-config`, cron, ou rien.
 ## Non publié
 
 ### Ajouté
+- `templates/site/` : modèle de site branché sur le socle, un seul jeu de fichiers pour
+  Symfony, WordPress, PrestaShop 9 et HTML statique (`PROJECT_TYPE`, services par
+  `COMPOSE_PROFILES`), prod avec alias `www` optionnel (domaine racine seulement), workflow de
+  déploiement par runner self-hosted. Validé par une installation réelle de chaque type ; 14
+  tests bats (`tests/site-template.bats`). Action serveur : aucune.
 - Socle complet : `compose.yml` (Traefik 2.11, MySQL 8.0, MariaDB 11.3 sous profil, phpMyAdmin,
   Mailpit), `.env.example` exhaustif, `Makefile` (`networks`, `certs`, `check`, `up`, `down`,
   `ps`, `logs`, `traefik-config`, `deploy`, `test`).

@@ -1,0 +1,63 @@
+# Prod : même découpage qu'en local, certificat Let's Encrypt, redémarrage automatique.
+# Domaine racine : ajouter docker-compose.prod.www.yml (PROD_WWW_ALIAS=1, géré par le Makefile).
+services:
+    php:
+        profiles: [php]
+        build:
+            context: ./php
+            args:
+                PHP_VERSION: ${PHP_VERSION}
+                COMPOSER_VERSION: ${COMPOSER_VERSION}
+                ENABLE_XDEBUG: 0
+                UID: ${UID}
+                GID: ${GID}
+        image: ${COMPOSE_PROJECT_NAME}-php:${PHP_VERSION}
+        restart: unless-stopped
+        volumes:
+            - ${APP_FOLDER}:/var/www
+            - ./php/90-extra-config.ini:/usr/local/etc/php/conf.d/90-extra-config.ini
+        networks: [project_network, databases, mailer]
+
+    nginx:
+        build:
+            context: ./nginx
+        restart: unless-stopped
+        volumes:
+            - ${APP_FOLDER}:/var/www
+            - ./nginx/${PROJECT_TYPE}.conf:/etc/templates/nginx.conf
+        environment:
+            ADMIN_FOLDER_PRESTASHOP: ${ADMIN_FOLDER_PRESTASHOP}
+        depends_on:
+            php:
+                condition: service_started
+                required: false
+        labels:
+            - "traefik.enable=true"
+            - "traefik.docker.network=traefik"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.rule=Host(`${COMPOSE_PRODUCTION_DOMAIN}`)"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.entrypoints=websecure"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls=true"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=le"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.middlewares=security-headers@file"
+            - "traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=80"
+        networks: [project_network, traefik]
+
+    # Consommateur Symfony Messenger : COMPOSE_PROFILES=php,worker.
+    worker:
+        profiles: [worker]
+        image: ${COMPOSE_PROJECT_NAME}-php:${PHP_VERSION}
+        command: sh -c "exec php /var/www/bin/console messenger:consume async -vv --time-limit=3600 --memory-limit=256M >> /var/www/var/log/messenger.log 2>&1"
+        restart: unless-stopped
+        volumes:
+            - ${APP_FOLDER}:/var/www
+        depends_on: [php]
+        networks: [project_network, databases, mailer]
+
+networks:
+    project_network:
+    databases:
+        external: true
+    mailer:
+        external: true
+    traefik:
+        external: true
