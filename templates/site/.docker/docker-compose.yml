@@ -5,12 +5,11 @@ services:
         build:
             context: ./php
             args:
-                PHP_VERSION: ${PHP_VERSION}
                 COMPOSER_VERSION: ${COMPOSER_VERSION}
                 ENABLE_XDEBUG: ${ENABLE_XDEBUG}
                 UID: ${UID}
                 GID: ${GID}
-        image: ${COMPOSE_PROJECT_NAME}-php:${PHP_VERSION}
+        image: ${COMPOSE_PROJECT_NAME}-php
         volumes:
             - ${APP_FOLDER}:/var/www
             - ./php/90-extra-config.ini:/usr/local/etc/php/conf.d/90-extra-config.ini

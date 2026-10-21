@@ -117,10 +117,14 @@ config() { (cd "$S/.docker" && docker compose -f "$1" config); }
   [[ "$output" =~ memory_limit\ =\ [0-9]+M$ ]]
 }
 
-@test "un seul Dockerfile PHP, version en argument" {
+@test "un seul Dockerfile PHP, version figée dans le FROM" {
   [ -f "$T/.docker/php/Dockerfile" ]
-  grep -q '^ARG PHP_VERSION' "$T/.docker/php/Dockerfile"
-  grep -q 'FROM php:${PHP_VERSION}-fpm' "$T/.docker/php/Dockerfile"
+  grep -Eq '^FROM php:[0-9]+\.[0-9]+-fpm$' "$T/.docker/php/Dockerfile"
+}
+
+@test "la version PHP n'est jamais une variable d'environnement (.env non synchronisé au déploiement)" {
+  run grep -rn 'PHP_VERSION' "$T/.docker" "$T/Makefile"
+  [ "$status" -eq 1 ]
 }
 
 @test "pas de fichiers d'IDE ni de .env dans le modèle" {

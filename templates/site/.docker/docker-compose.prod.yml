@@ -6,12 +6,11 @@ services:
         build:
             context: ./php
             args:
-                PHP_VERSION: ${PHP_VERSION}
                 COMPOSER_VERSION: ${COMPOSER_VERSION}
                 ENABLE_XDEBUG: 0
                 UID: ${UID}
                 GID: ${GID}
-        image: ${COMPOSE_PROJECT_NAME}-php:${PHP_VERSION}
+        image: ${COMPOSE_PROJECT_NAME}-php
         restart: unless-stopped
         volumes:
             - ${APP_FOLDER}:/var/www
@@ -45,7 +44,7 @@ services:
     # Consommateur Symfony Messenger : COMPOSE_PROFILES=php,worker.
     worker:
         profiles: [worker]
-        image: ${COMPOSE_PROJECT_NAME}-php:${PHP_VERSION}
+        image: ${COMPOSE_PROJECT_NAME}-php
         command: sh -c "exec php /var/www/bin/console messenger:consume async -vv --time-limit=3600 --memory-limit=256M >> /var/www/var/log/messenger.log 2>&1"
         restart: unless-stopped
         volumes:

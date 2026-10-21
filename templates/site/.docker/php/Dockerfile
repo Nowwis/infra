@@ -1,5 +1,6 @@
-ARG PHP_VERSION=8.4
-FROM php:${PHP_VERSION}-fpm
+# Version PHP figée ici, seul endroit : elle suit le code (relue en PR, testée, revert possible).
+# Jamais dans .docker/.env, que le déploiement ne synchronise pas (docs/DECISIONS.md, 2026-10-21).
+FROM php:8.4-fpm
 
 ARG UID=1000
 ARG GID=1000

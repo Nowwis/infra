@@ -33,8 +33,9 @@ Le site répond sur `https://<COMPOSE_PROJECT_NAME>.docker.test` (certificat mkc
 
 ## Choix du modèle
 
-- **PHP** : une seule image, version par `PHP_VERSION` (8.4 par défaut). Extensions communes
-  aux trois frameworks. Xdebug par `ENABLE_XDEBUG=1` puis `make upbuild`.
+- **PHP** : une seule image, version **figée dans `.docker/php/Dockerfile`** (`FROM php:8.4-fpm`),
+  jamais dans `.docker/.env` (voir `docs/DECISIONS.md`, 2026-10-21). Changer de version = une PR.
+  Extensions communes aux trois frameworks. Xdebug par `ENABLE_XDEBUG=1` puis `make upbuild`.
 - **HTTPS vu par PHP** : Traefik termine le TLS ; nginx transmet `HTTPS=on` à PHP d'après
   `X-Forwarded-Proto`. Sans cela, WordPress et PrestaShop redirigent vers `http://`.
 - **Assets Symfony** : le conteneur nodejs installe les dépendances puis reste inactif. Pas de
