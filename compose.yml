@@ -73,7 +73,9 @@ services:
       - databases
 
   phpmyadmin:
-    image: phpmyadmin/phpmyadmin
+    # Image officielle Docker (library), reconstruite à chaque correctif PHP. phpmyadmin/phpmyadmin n'est
+    # plus mise à jour (PHP 8.3.26 au 2026-10-22, vulnérable à PHP2Shell). Branche figée, correctifs suivis.
+    image: phpmyadmin:5.2
     container_name: infra_phpmyadmin
     restart: always
     environment:

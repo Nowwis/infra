@@ -78,6 +78,14 @@ ni `sudo`.
 **Décision.** Le moteur SQL n'a rien à faire sur le réseau que Traefik route ; `DEBUG` en prod
 remplit le disque et expose des détails inutiles.
 
+## 2026-10-22 — phpMyAdmin : image officielle `phpmyadmin:5.2`
+
+**Décision.** L'image Docker officielle (`phpmyadmin`, dépôt library) remplace `phpmyadmin/phpmyadmin`.
+
+**Pourquoi.** `phpmyadmin/phpmyadmin` n'a pas bougé depuis le 2025-10-08 (PHP 8.3.26) ; l'image officielle a
+été reconstruite le 2026-10-22 avec PHP 8.3.36 (correctif PHP2Shell). Même phpMyAdmin (5.2.3), mêmes
+variables `PMA_*`. Branche `5.2` figée, correctifs suivis par `docker compose pull`.
+
 ## À trancher
 
 - ~~Licence~~ : MIT, tranché le 2026-10-07.
