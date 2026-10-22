@@ -5,6 +5,11 @@ requise : nouvelle variable `.env`, `make traefik-config`, cron, ou rien.
 
 ## Non publié
 
+### Sécurité
+- phpMyAdmin passe sur l'image officielle `phpmyadmin:5.2` (PHP 8.3.36, correctif PHP2Shell) ;
+  `phpmyadmin/phpmyadmin` n'est plus mise à jour. **Action serveur** : `git pull`, puis
+  `docker compose pull phpmyadmin && docker compose up -d --no-deps phpmyadmin`.
+
 ### Ajouté
 - Socle complet : `compose.yml` (Traefik 2.11, MySQL 8.0, MariaDB 11.3 sous profil, phpMyAdmin,
   Mailpit), `.env.example` exhaustif, `Makefile` (`networks`, `certs`, `check`, `up`, `down`,
