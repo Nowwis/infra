@@ -5,6 +5,13 @@ requise : nouvelle variable `.env`, `make traefik-config`, cron, ou rien.
 
 ## Non publié
 
+### Modifié
+- Traefik passe en **v3.7** (`traefik:v3.7`) : la 2.11 n'a plus de correctifs de sécurité depuis le
+  2026-09-07. `aliasHeadersStrategy: delete` sur `web` et `websecure` (en-têtes imitant un autre en-tête,
+  lus comme tel par PHP/nginx). **Action serveur** : `git pull`, puis `docker compose pull reverse-proxy
+  && docker compose up -d --no-deps reverse-proxy`. Côté applications : plus de `Host(`a`, `b`)` à plusieurs
+  arguments, à réécrire dans les applications avant la montée.
+
 ### Sécurité
 - phpMyAdmin passe sur l'image officielle `phpmyadmin:5.2` (PHP 8.3.36, correctif PHP2Shell) ;
   `phpmyadmin/phpmyadmin` n'est plus mise à jour. **Action serveur** : `git pull`, puis

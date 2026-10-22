@@ -26,6 +26,9 @@ entryPoints:
   web:
     address: ':80'
     http:
+      # v3 : supprime les en-têtes qui en imitent un autre (X_Forwarded_For, X.Auth.User…). PHP, nginx
+      # et CGI les lisent comme l'en-tête imité : sans cela un client usurpe ceux que Traefik pose.
+      aliasHeadersStrategy: delete
       redirections:
         entryPoint:
           to: websecure
@@ -33,3 +36,5 @@ entryPoints:
 
   websecure:
     address: ':443'
+    http:
+      aliasHeadersStrategy: delete

@@ -86,6 +86,19 @@ remplit le disque et expose des détails inutiles.
 été reconstruite le 2026-10-22 avec PHP 8.3.36 (correctif PHP2Shell). Même phpMyAdmin (5.2.3), mêmes
 variables `PMA_*`. Branche `5.2` figée, correctifs suivis par `docker compose pull`.
 
+## 2026-10-22 — Traefik v3.7
+
+**Décision.** Image `traefik:v3.7` (branche supportée), syntaxe de règles v3 par défaut, sans
+`core.defaultRuleSyntax: v2`. `aliasHeadersStrategy: delete` sur les points d'entrée publics. Encodage des
+caractères du chemin laissé aux valeurs par défaut (tout autorisé) pour ne rien casser côté WordPress /
+PrestaShop ; à resserrer application par application si besoin.
+
+**Pourquoi.** La 2.11 n'a plus de correctifs depuis le 2026-09-07. Inventaire des routeurs des hôtes avant
+la montée : une seule règle en syntaxe v2, aucun HostRegexp, Headers(), ipWhiteList ni option d'en-têtes
+retirée. Test sur un hôte local : mêmes codes HTTP qu'en 2.11.60 sur tous les routeurs.
+
+**Ce que ça exclut.** Toute nouvelle règle `Host(`a`, `b`)` : écrire `Host(`a`) || Host(`b`)`.
+
 ## À trancher
 
 - ~~Licence~~ : MIT, tranché le 2026-10-07.
