@@ -123,6 +123,44 @@ services:
       - traefik
       - mailer
 
+  # Surveillance externe (disponibilité, codes HTTP, expiration TLS) avec alertes Telegram.
+  # Profil optionnel `gatus` : COMPOSE_PROFILES=gatus dans .env (ou make up PROFILES=gatus).
+  # La liste de ce que l'hôte surveille n'est PAS dans ce dépôt : elle est fournie par l'hôte, dans
+  # le dossier GATUS_CONFIG_DIR (chemin absolu hors du checkout). configuration/gatus/example/ en
+  # donne la forme. Service nommé `gatus`, pas `monitoring` : ce nom désigne déjà le routeur du
+  # tableau de bord Traefik et MONITORING_DOMAIN.
+  gatus:
+    image: twinproduction/gatus:v5.37.0
+    container_name: infra_gatus
+    restart: always
+    profiles: [gatus]
+    environment:
+      # Un DOSSIER, comme la config dynamique de Traefik : un bind mount de fichier garde l'ancien
+      # inode quand le fichier est remplacé, et Gatus ne verrait jamais la nouvelle liste.
+      - GATUS_CONFIG_PATH=/config
+      # Seules variables passées au conteneur : la config ne peut référencer qu'elles (make check).
+      - GATUS_TELEGRAM_TOKEN=${GATUS_TELEGRAM_TOKEN:-}
+      - GATUS_TELEGRAM_CHAT_ID=${GATUS_TELEGRAM_CHAT_ID:-}
+    volumes:
+      # Valeur par défaut volontairement inexistante : sans GATUS_CONFIG_DIR, Gatus ne trouve aucune
+      # config et s'arrête (make check le refuse avant). Jamais de repli silencieux sur l'exemple.
+      - ${GATUS_CONFIG_DIR:-./configuration/gatus/unset}:/config:ro
+      - ./datas/gatus:/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gatus.rule=Host(`${GATUS_DOMAIN:-}`)"
+      - "traefik.http.routers.gatus.tls=true"
+      - "traefik.http.routers.gatus.entrypoints=${TRAEFIK_ENTRYPOINT}"
+      - "traefik.http.routers.gatus.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
+      - "traefik.http.services.gatus.loadbalancer.server.port=8080"
+      # Même règle que phpMyAdmin : identifiants propres, variable vide = middleware invalide =
+      # routeur supprimé = 404. La page liste tous les domaines surveillés : jamais ouverte.
+      - "traefik.http.routers.gatus.middlewares=gatus-auth"
+      - "traefik.http.middlewares.gatus-auth.basicauth.users=${TRAEFIK_GATUS_USERS:-}"
+      - "traefik.docker.network=traefik"
+    networks:
+      - traefik
+
 # Réseaux créés une fois par hôte (make networks) : ils survivent au `down` du socle et sont
 # rejoints par les applications en `external: true`.
 networks:

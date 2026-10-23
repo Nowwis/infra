@@ -99,6 +99,29 @@ retirée. Test sur un hôte local : mêmes codes HTTP qu'en 2.11.60 sur tous les
 
 **Ce que ça exclut.** Toute nouvelle règle `Host(`a`, `b`)` : écrire `Host(`a`) || Host(`b`)`.
 
+## 2026-10-23 — Surveillance externe : Gatus en profil, config fournie par l'hôte
+
+**Décision.** Gatus (`twinproduction/gatus:v5.37.0`), service `gatus` sous le profil `gatus`. La config
+(ce que l'hôte surveille) n'est pas versionnée ici : elle vit hors du dépôt, dans le dossier
+`GATUS_CONFIG_DIR` fourni par l'hôte (chemin absolu, monté en lecture seule sur `/config`, rechargé à
+chaud). Historique en sqlite dans `datas/gatus/`, alertes Telegram (3 échecs de suite, retour à la
+normale notifié), page d'état derrière un basic-auth dédié qui échoue fermé. Le dépôt ne livre qu'un
+exemple neutre, `configuration/gatus/example/config.yaml`.
+
+**Pourquoi.** Gratuit, configuration en fichiers, une seule image sans base externe, alerte Telegram
+native. La liste surveillée nomme des domaines et des hôtes réels : elle n'a pas sa place dans un dépôt
+public, d'où un dossier par hôte, hors du checkout. Un hôte ne surveille pas sa propre machine : une
+panne de l'hôte emporterait l'alerte avec elle.
+
+**Limites assumées.** Gatus ne détecte pas la SUPPRESSION d'un fichier de config : redémarrer le
+conteneur dans ce cas. La config de chaque hôte n'est relue par aucune PR de ce dépôt : `make check`
+la fait au moins charger par l'image avant chaque déploiement.
+
+**Ce que ça exclut.** Un service SaaS de supervision ; une config Gatus dans le checkout (`make check`
+refuse un `GATUS_CONFIG_DIR` relatif ou situé dans le dépôt) ; toute alerte qui ne passe pas par
+`make check` (jeton Telegram vide = Gatus muet sans erreur ; config invalide = Gatus s'arrête au
+rechargement). `make deploy` s'arrête désormais si `make check` échoue (il continuait).
+
 ## À trancher
 
 - ~~Licence~~ : MIT, tranché le 2026-10-07.

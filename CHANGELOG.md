@@ -6,6 +6,9 @@ requise : nouvelle variable `.env`, `make traefik-config`, cron, ou rien.
 ## Non publié
 
 ### Modifié
+- `make deploy` s'arrête si `make check` échoue (il recréait quand même le reverse proxy) et met à
+  jour `gatus` quand le profil est actif. `make check` lit le `.env` désigné par `INFRA_ENV_FILE` aussi
+  pour `docker compose config`. **Action serveur** : aucune.
 - Traefik passe en **v3.7** (`traefik:v3.7`) : la 2.11 n'a plus de correctifs de sécurité depuis le
   2026-09-07. `aliasHeadersStrategy: delete` sur `web` et `websecure` (en-têtes imitant un autre en-tête,
   lus comme tel par PHP/nginx). **Action serveur** : `git pull`, puis `docker compose pull reverse-proxy
@@ -18,6 +21,12 @@ requise : nouvelle variable `.env`, `make traefik-config`, cron, ou rien.
   `docker compose pull phpmyadmin && docker compose up -d --no-deps phpmyadmin`.
 
 ### Ajouté
+- **Surveillance Gatus** (profil optionnel `gatus`, `infra_gatus`, `twinproduction/gatus:v5.37.0`) :
+  config fournie par l'hôte hors du dépôt (`GATUS_CONFIG_DIR`, montée en lecture seule), exemple neutre
+  dans `configuration/gatus/example/`, alertes Telegram, page d'état derrière `gatus-auth`. `make check`
+  valide variables, dossier et config (chargée par l'image) quand le profil est actif ; 15 tests bats de
+  plus. `.env.example` : `COMPOSE_PROFILES`, `GATUS_*`, `TRAEFIK_GATUS_USERS`. **Action serveur** : rien
+  sur les hôtes qui n'activent pas le profil ; sinon dossier de config, variables `.env`, puis `make up`.
 - Socle complet : `compose.yml` (Traefik 2.11, MySQL 8.0, MariaDB 11.3 sous profil, phpMyAdmin,
   Mailpit), `.env.example` exhaustif, `Makefile` (`networks`, `certs`, `check`, `up`, `down`,
   `ps`, `logs`, `traefik-config`, `deploy`, `test`).

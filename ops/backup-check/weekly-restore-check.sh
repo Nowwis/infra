@@ -32,7 +32,7 @@
 #   ALERT_EMAIL_TO      destinataire des alertes (active l'alerte mail)
 #   ALERT_SMTP_HOST/PORT/FROM   serveur SMTP (défaut: localhost:1025 = mailpit)
 #   ALERT_WEBHOOK_URL   URL POST JSON pour alerte (Slack/Discord/générique)
-#   ALERT_NOTIFY_CMD    commande recevant le message sur stdin (ex: notify, dépôt devlab → Telegram)
+#   ALERT_NOTIFY_CMD    commande recevant le message sur stdin (ex: une commande de notification locale → Telegram)
 #   HISTORY_FILE        CSV d'historique (défaut: backup/.restore-history.csv)
 #   WORK_ROOT           dossier de travail (défaut: /tmp)
 #
@@ -127,7 +127,7 @@ print(json.dumps(msg))')
     curl -fsS -m 15 -H 'Content-Type: application/json' -d "$json" "$ALERT_WEBHOOK_URL" >/dev/null \
       && log "Alerte webhook envoyée" || err "Échec envoi webhook"
   fi
-  # Commande locale (devlab `notify` → Telegram) : le message complet sur stdin.
+  # Commande de notification locale (outillage privé du propriétaire, ex. Telegram) : le message complet sur stdin.
   if [ -n "${ALERT_NOTIFY_CMD:-}" ]; then
     if command -v "$ALERT_NOTIFY_CMD" >/dev/null 2>&1; then
       printf '[restore-check] %s\n\n%s\n' "$subject" "$body" | "$ALERT_NOTIFY_CMD" \

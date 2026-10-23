@@ -1,0 +1,93 @@
+# Gatus — config d'EXEMPLE. La vraie liste de chaque hôte n'est pas versionnée ici : elle vit dans
+# le dossier GATUS_CONFIG_DIR fourni par l'hôte (chemin absolu hors du dépôt), monté en lecture
+# seule sur /config. Copier ce fichier dans ce dossier, puis remplacer les points de contrôle.
+#
+# Rechargé à chaud : le DOSSIER est monté (GATUS_CONFIG_PATH=/config), une modification de fichier
+# suffit. Une config invalide fait sortir Gatus au rechargement : `make check` la valide avant.
+# Gatus ne voit pas la SUPPRESSION d'un fichier : `docker restart infra_gatus` dans ce cas.
+#
+# Seules variables utilisables : GATUS_TELEGRAM_TOKEN et GATUS_TELEGRAM_CHAT_ID (transmises par
+# compose.yml) ; make check refuse toute autre référence `${...}`.
+#
+# Conventions de chaque point de contrôle :
+#   - code HTTP attendu = celui constaté au moment de l'écriture ;
+#   - redirections NON suivies (client.ignore-redirect) : un 301/302 est vérifié pour lui-même ;
+#   - certificat valide encore plus de 20 jours (480h) ;
+#   - temps de réponse sous 5 s.
+# Un seul `alerts: *telegram` par point de contrôle : seuils et texte dans alerting.telegram.default-alert.
+# Ne pas surveiller l'hôte qui fait tourner Gatus : une panne de l'hôte emporterait l'alerte avec elle.
+
+storage:
+  type: sqlite
+  path: /data/data.db
+
+ui:
+  title: "État des services"
+  header: "Surveillance externe"
+
+alerting:
+  telegram:
+    token: "${GATUS_TELEGRAM_TOKEN}"
+    id: "${GATUS_TELEGRAM_CHAT_ID}"
+    default-alert:
+      enabled: true
+      failure-threshold: 3
+      success-threshold: 2
+      send-on-resolved: true
+      description: "surveillance externe"
+
+endpoints:
+  # Site public : 200, certificat, temps de réponse.
+  - name: example.com
+    group: sites
+    url: "https://example.com"
+    interval: 2m
+    client: &noredirect
+      ignore-redirect: true
+    conditions:
+      - "[STATUS] == 200"
+      - "[CERTIFICATE_EXPIRATION] > 480h"
+      - "[RESPONSE_TIME] < 5000"
+    alerts: &telegram
+      - type: telegram
+
+  # Redirection vérifiée pour elle-même (non suivie).
+  - name: www.example.org (301)
+    group: sites
+    url: "https://www.example.org"
+    interval: 2m
+    client: *noredirect
+    conditions:
+      - "[STATUS] == 301"
+      - "[CERTIFICATE_EXPIRATION] > 480h"
+      - "[RESPONSE_TIME] < 5000"
+    alerts: *telegram
+
+  # Page derrière un basic-auth : 401 attendu sans identifiants (un 200 = protection perdue).
+  - name: status.example.org (401)
+    group: outils
+    url: "https://status.example.org"
+    interval: 5m
+    client: *noredirect
+    conditions:
+      - "[STATUS] == 401"
+      - "[CERTIFICATE_EXPIRATION] > 480h"
+    alerts: *telegram
+
+  # Port TCP d'un autre hôte (SSH, base…).
+  - name: ssh example.org
+    group: hôtes
+    url: "tcp://example.org:22"
+    interval: 2m
+    conditions:
+      - "[CONNECTED] == true"
+    alerts: *telegram
+
+  # Ping (ICMP) d'un autre hôte.
+  - name: ping example.org
+    group: hôtes
+    url: "icmp://example.org"
+    interval: 2m
+    conditions:
+      - "[CONNECTED] == true"
+    alerts: *telegram

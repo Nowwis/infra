@@ -12,6 +12,7 @@ tient dans un `.env` et un dossier de configuration par environnement.
 | MariaDB 11.3 | `infra_mariadb_11_3` | Second moteur, **profil optionnel** | réseau `databases` |
 | phpMyAdmin | `infra_phpmyadmin` | Console SQL des deux moteurs, basic-auth dédié | `$PMA_DOMAIN` |
 | Mailpit | `infra_mailer` | Capteur SMTP + interface web | `infra_mailer:1025`, `$MAILPIT_DOMAIN` |
+| Gatus v5.37 | `infra_gatus` | Surveillance externe d'autres hôtes, alertes Telegram, **profil optionnel** `gatus` | `$GATUS_DOMAIN` (basic-auth dédié) |
 
 Les applications ne déclarent **que** leurs services, rejoignent les réseaux externes `traefik`,
 `databases`, `mailer`, et se publient par labels. Le contrat complet : [`docs/CONTRACT.md`](docs/CONTRACT.md).
@@ -40,6 +41,24 @@ un `$` non doublé, ou que le dossier de configuration dynamique de l'environnem
 Ces trois erreurs ont chacune déjà mis des sites en 404 ; c'est pour cela que la vérification
 n'est pas optionnelle.
 
+## Surveillance (profil `gatus`)
+
+Un hôte qui active le profil surveille **d'autres** hôtes : codes HTTP, redirections, expiration
+des certificats (plus de 20 jours), temps de réponse, ports TCP, ping, et alerte sur Telegram après
+3 échecs consécutifs (message de retour à la normale inclus).
+
+La liste de ce qu'un hôte surveille **n'est pas dans ce dépôt** : elle vit hors du dépôt, dans un
+dossier fourni par l'hôte, désigné par `GATUS_CONFIG_DIR` (chemin absolu) et monté en lecture seule.
+Le dépôt n'en donne que la forme : [`configuration/gatus/example/config.yaml`](configuration/gatus/example/config.yaml).
+Une modification d'un fichier de ce dossier est rechargée à chaud.
+
+Activer sur un hôte : `COMPOSE_PROFILES=gatus` (ou `mariadb,gatus`), `GATUS_CONFIG_DIR`, `GATUS_DOMAIN`,
+`TRAEFIK_GATUS_USERS`, `GATUS_TELEGRAM_TOKEN`, `GATUS_TELEGRAM_CHAT_ID` dans `.env` (voir `.env.example`),
+puis `make up`. `make check` refuse un dossier relatif, absent, situé dans le checkout ou sans `.yaml`,
+un jeton Telegram vide (Gatus démarrerait sans jamais alerter), et fait charger la config par l'image
+Gatus avant tout déploiement. Supprimer un fichier du dossier n'est pas vu par Gatus : `docker restart
+infra_gatus` après un retrait de fichier (une modification, elle, est vue).
+
 ## Documentation
 
 | Document | Pour |
@@ -58,7 +77,7 @@ n'est pas optionnelle.
 ## Arborescence
 
 ```
-compose.yml                      les cinq services, un seul fichier pour tous les hôtes
+compose.yml                      les six services, un seul fichier pour tous les hôtes
 .env.example                     toutes les variables, commentées
 Makefile                         networks · certs · check · up · down · ps · logs · traefik-config · deploy · test
 bin/infra-check                  la vérification pré-déploiement (make check)
@@ -70,6 +89,7 @@ configuration/traefik2/
   certs/                         mkcert (gitignoré)      logs/  journal d'accès (gitignoré)
   rotate-logs.sh                 rotation du journal d'accès, sans logrotate, via cron
 configuration/mysql_8_0/conf.d/  surcharges MySQL (vide par défaut)
+configuration/gatus/example/     forme d'une config Gatus (la vraie vit hors du dépôt, GATUS_CONFIG_DIR)
 datas/                           données des moteurs (gitignoré)      letsencrypt/  acme.json (gitignoré)
 ops/backup-check/                contrôle hebdomadaire de restauration (scripts, unité systemd, env exemple)
 ops/sync-db-names.sh             renommage de bases par dump/reload, non destructif par défaut
