@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
 # bin/infra-check — tout est fichier : aucun docker (INFRA_SKIP_DOCKER=1).
+# Exception : les tests « mysql : » posent un faux `docker` dans le PATH (mysql_stub).
 
 setup() {
   export ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -310,5 +311,63 @@ set_var() { sed -i "s|^$1=.*|$1=$2|" "$INFRA_ENV_FILE"; }
 @test "gatus : l'exemple versionné passe les contrôles fichier en prod" {
   env_prod; gatus_on
   run infra-check
+  [ "$status" -eq 0 ]
+}
+
+# --- série MySQL : faux `docker` qui répond pour les réseaux, compose config et le conteneur MySQL.
+# STUB_MYSQL_IMAGE = image du conteneur en service (vide : aucun conteneur).
+mysql_stub() {
+  export INFRA_SKIP_DOCKER=0
+  mkdir -p "$SANDBOX/bin"
+  cat > "$SANDBOX/bin/docker" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  inspect) [ -n "${STUB_MYSQL_IMAGE:-}" ] && { echo "$STUB_MYSQL_IMAGE"; exit 0; }; exit 1 ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x "$SANDBOX/bin/docker"
+  PATH="$SANDBOX/bin:$PATH"
+  printf 'services:\n  mysql:\n    image: %s\n    container_name: infra_mysql_8_0\n' "$1" > "$INFRA_ROOT/compose.yml"
+}
+
+@test "mysql : même série en service et dans compose.yml : OK" {
+  env_prod; mysql_stub mysql:8.4; export STUB_MYSQL_IMAGE=mysql:8.4.13
+  run infra-check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"série 8.4 en service = compose.yml"* ]]
+}
+
+@test "mysql : montée de série non confirmée : échec, renvoi au runbook" {
+  env_prod; mysql_stub mysql:8.4; export STUB_MYSQL_IMAGE=mysql:8.0
+  run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"MySQL 8.0 en service, 8.4 dans compose.yml"* ]]
+  [[ "$output" == *"MYSQL_UPGRADE_CONFIRMED=1"* ]]
+}
+
+@test "mysql : montée de série confirmée : OK" {
+  env_prod; mysql_stub mysql:8.4; export STUB_MYSQL_IMAGE=mysql:8.0 MYSQL_UPGRADE_CONFIRMED=1
+  run infra-check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"8.0 → 8.4 confirmé"* ]]
+}
+
+@test "mysql : descente de série : échec même confirmée" {
+  env_prod; mysql_stub mysql:8.0; export STUB_MYSQL_IMAGE=mysql:8.4 MYSQL_UPGRADE_CONFIRMED=1
+  run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"une série antérieure ne démarre pas"* ]]
+}
+
+@test "mysql : aucun conteneur en service (premier démarrage) : OK" {
+  env_prod; mysql_stub mysql:8.4; export STUB_MYSQL_IMAGE=
+  run infra-check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"aucun conteneur infra_mysql_8_0"* ]]
+}
+
+@test "mysql : compose.yml versionné déclare la série 8.4" {
+  run grep -E '^[[:space:]]*image:[[:space:]]*mysql:8\.4([[:space:]]|$)' "$ROOT/compose.yml"
   [ "$status" -eq 0 ]
 }

@@ -65,7 +65,8 @@ ACME n'a pas de sens et le tableau de bord est ouvert) ; en prod, le port 80 doi
 
 ## 4. Les moteurs de base de données
 
-- **MySQL 8.0** : le moteur par défaut, une instance par hôte, toutes les applications.
+- **MySQL 8.4 LTS** : le moteur par défaut, une instance par hôte, toutes les applications. Le
+  conteneur garde son nom historique `infra_mysql_8_0` (contrat des applications).
 - **MariaDB 11.3** : second moteur, sous **profil Compose** (`make up PROFILES=mariadb`). Il
   existe pour les applications dont la production tourne en MariaDB : Doctrine et consorts
   génèrent du SQL différent selon le moteur et sa version (`serverVersion`), les collations

@@ -5,7 +5,7 @@
 #
 #
 # Principe :
-#   1. Démarre un conteneur MySQL 8.0 JETABLE (nom aléatoire, AUCUN port publié,
+#   1. Démarre un conteneur MySQL JETABLE de la série du socle (nom aléatoire, aucun port publié,
 #      datadir temporaire) — totalement isolé de la prod.
 #   2. Restaure chaque dump *.sql.gz trouvé dans le dossier de backup.
 #   3. Contrôles d'intégrité : CHECK TABLE sur toutes les tables, comptage des
@@ -23,7 +23,7 @@
 #
 # Options :
 #   --backup-dir DIR     Dossier contenant les *.sql.gz à restaurer (obligatoire)
-#   --image IMG          Image MySQL (défaut: mysql:8.0)
+#   --image IMG          Image MySQL (défaut: mysql:8.4, la série de compose.yml)
 #   --pattern GLOB       Motif des dumps (défaut: *.sql.gz)
 #   --expect FILE        Fichier "db.table<TAB>nb_lignes" pour asserter les counts
 #   --keep               Ne pas détruire le conteneur en fin (debug)
@@ -32,7 +32,7 @@
 set -euo pipefail
 
 # --- Defaults ---------------------------------------------------------------
-IMAGE="mysql:8.0"
+IMAGE="mysql:8.4"
 PATTERN="*.sql.gz"
 BACKUP_DIR=""
 EXPECT_FILE=""

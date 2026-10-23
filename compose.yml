@@ -46,7 +46,12 @@ services:
       - traefik
 
   mysql:
-    image: mysql:8.0
+    # 8.4 = branche LTS (correctifs seulement). Passage de série = mise à niveau EN PLACE du
+    # dictionnaire de données, SANS retour arrière en place : dump logique d'abord, procédure dans
+    # docs/RUNBOOK-deploy.md §4 ; `make check` refuse le changement de série non confirmé.
+    # Le nom du conteneur et les chemins `mysql_8_0` restent : les applications les référencent
+    # (contrat, docs/CONTRACT.md). Ils ne désignent plus la version.
+    image: mysql:8.4
     container_name: infra_mysql_8_0
     restart: always
     environment:
@@ -82,7 +87,7 @@ services:
     environment:
       # Les deux moteurs sont proposés ; l'entrée MariaDB n'est joignable que si le profil tourne.
       - PMA_HOSTS=infra_mysql_8_0,infra_mariadb_11_3
-      - PMA_VERBOSES=MySQL 8.0,MariaDB 11.3.2
+      - PMA_VERBOSES=MySQL 8.4,MariaDB 11.3.2
       - UPLOAD_LIMIT=${PMA_UPLOAD_LIMIT:-512M}
     labels:
       - "traefik.enable=true"

@@ -14,10 +14,13 @@
 #   7. réseaux externes traefik, databases, mailer (si docker est disponible)
 #   8. `docker compose config` valide (si docker est disponible)
 #   9. profil gatus : la config est chargée par l'image Gatus elle-même (si docker est disponible)
+#  10. série MySQL (X.Y) du conteneur en service = celle de compose.yml (si docker est disponible) :
+#      montée de série refusée sans MYSQL_UPGRADE_CONFIRMED=1, descente toujours refusée
 #
 # Sortie : 0 tout est bon · 1 au moins un échec (liste complète affichée, pas d'arrêt au premier).
 # Variables : INFRA_ROOT (défaut : dossier parent), INFRA_ENV_FILE (défaut : $INFRA_ROOT/.env),
-# INFRA_SKIP_DOCKER=1 pour ignorer les contrôles 7 à 9 (tests, hôte sans docker).
+# INFRA_SKIP_DOCKER=1 pour ignorer les contrôles 7 à 10 (tests, hôte sans docker).
+# MYSQL_UPGRADE_CONFIRMED=1 : la montée de série MySQL est voulue et son dump préalable est fait.
 set -uo pipefail
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 : "${INFRA_ROOT:=$(cd "$(dirname "$SELF")/.." && pwd)}"
@@ -183,6 +186,29 @@ if [ "$INFRA_SKIP_DOCKER" != 1 ] && command -v docker >/dev/null 2>&1; then
       fail "gatus : impossible de lancer $GATUS_IMAGE : $(tr '\n' ' ' < /tmp/infra-check.$$ | cut -c1-200)"
     fi
     rm -f /tmp/infra-check.$$
+  fi
+  # Changer de série MySQL (8.0 → 8.4) met à niveau le dictionnaire de données EN PLACE au premier
+  # démarrage : aucune descente en place n'est possible ensuite, seule la restauration d'un dump
+  # ramène l'ancienne série (docs/RUNBOOK-deploy.md §4). `make up` recréerait le conteneur avec la
+  # nouvelle image : on refuse tant que l'opérateur n'a pas confirmé, dump fait.
+  want="$(sed -nE 's/^[[:space:]]*image:[[:space:]]*(mysql:[^[:space:]]+).*/\1/p' "$INFRA_ROOT/compose.yml" | head -1)"
+  have="$(docker inspect -f '{{.Config.Image}}' infra_mysql_8_0 2>/dev/null || true)"
+  ws="$(sed -nE 's/^mysql:([0-9]+\.[0-9]+).*/\1/p' <<<"$want")"
+  hs="$(sed -nE 's/^mysql:([0-9]+\.[0-9]+).*/\1/p' <<<"$have")"
+  if [ -z "$have" ]; then
+    printf '  i aucun conteneur infra_mysql_8_0 : pas de série MySQL à comparer\n'
+  elif [ -z "$ws" ] || [ -z "$hs" ]; then
+    printf '  i série MySQL non comparable (en service : %s, compose.yml : %s)\n' "$have" "${want:-?}"
+  elif [ "$ws" = "$hs" ]; then
+    ok "MySQL : série $hs en service = compose.yml"
+  elif [ "$(printf '%s\n%s\n' "$hs" "$ws" | sort -V | head -1)" = "$hs" ]; then
+    if [ "${MYSQL_UPGRADE_CONFIRMED:-0}" = 1 ]; then
+      printf '  i MySQL %s → %s confirmé (MYSQL_UPGRADE_CONFIRMED=1) : sans retour arrière en place\n' "$hs" "$ws"
+    else
+      fail "MySQL $hs en service, $ws dans compose.yml : montée de série sans retour arrière en place. Dump logique d'abord (docs/RUNBOOK-deploy.md §4), puis relancer avec MYSQL_UPGRADE_CONFIRMED=1"
+    fi
+  else
+    fail "MySQL $hs en service, $ws dans compose.yml : une série antérieure ne démarre pas sur ces données. Retour arrière = restauration d'un dump (docs/RUNBOOK-deploy.md §4)"
   fi
 else
   printf '  i contrôles docker ignorés\n'

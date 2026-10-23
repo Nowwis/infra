@@ -8,7 +8,7 @@ tient dans un `.env` et un dossier de configuration par environnement.
 | Service | Conteneur | Rôle | Exposé |
 |---|---|---|---|
 | Traefik v3.7 | `infra_traefik` | Reverse proxy, TLS (mkcert en local, Let's Encrypt en prod), redirection 80→443 | 80, 443 |
-| MySQL 8.0 | `infra_mysql_8_0` | Base partagée par les applications | réseau `databases` |
+| MySQL 8.4 LTS | `infra_mysql_8_0` (nom historique, conservé) | Base partagée par les applications | réseau `databases` |
 | MariaDB 11.3 | `infra_mariadb_11_3` | Second moteur, **profil optionnel** | réseau `databases` |
 | phpMyAdmin | `infra_phpmyadmin` | Console SQL des deux moteurs, basic-auth dédié | `$PMA_DOMAIN` |
 | Mailpit | `infra_mailer` | Capteur SMTP + interface web | `infra_mailer:1025`, `$MAILPIT_DOMAIN` |
