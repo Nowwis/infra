@@ -6,6 +6,13 @@ requise : nouvelle variable `.env`, `make traefik-config`, cron, ou rien.
 ## Non publié
 
 ### Modifié
+- MySQL passe en **8.4 LTS** (`mysql:8.4`, testé en 8.4.13) : la 8.0 est en fin de vie. Mise à
+  niveau en place au premier démarrage, **sans retour arrière en place**. Le conteneur garde son nom
+  `infra_mysql_8_0` et ses chemins `datas/mysql_8_0/` (contrat des applications). `make check` refuse
+  un changement de série non confirmé (`MYSQL_UPGRADE_CONFIRMED=1`) et toute descente de série ;
+  `restore-test.sh` restaure par défaut sur `mysql:8.4`. **Action serveur** : procédure complète
+  `docs/RUNBOOK-deploy.md` §4 (comptes `mysql_native_password`, dump, copie à froid, montée) ;
+  `make deploy` s'arrête sur le contrôle MySQL tant que l'hôte n'est pas monté, c'est voulu.
 - `make deploy` s'arrête si `make check` échoue (il recréait quand même le reverse proxy) et met à
   jour `gatus` quand le profil est actif. `make check` lit le `.env` désigné par `INFRA_ENV_FILE` aussi
   pour `docker compose config`. **Action serveur** : aucune.

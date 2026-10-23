@@ -34,7 +34,7 @@ secrets, une fiche par hôte selon ce gabarit. La fiche est ce qui rend `RUNBOOK
 
 | Base | Moteur | Taille | Sauvegardée par | Contrôlée par `restore-check` |
 |---|---|---|---|---|
-| `prod_<slug>` | MySQL 8.0 | `<Mo>` | `<outil, cadence, destination>` | oui / non |
+| `prod_<slug>` | MySQL 8.4 | `<Mo>` | `<outil, cadence, destination>` | oui / non |
 
 ### Secrets et où ils sont
 

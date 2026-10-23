@@ -122,6 +122,31 @@ refuse un `GATUS_CONFIG_DIR` relatif ou situé dans le dépôt) ; toute alerte q
 `make check` (jeton Telegram vide = Gatus muet sans erreur ; config invalide = Gatus s'arrête au
 rechargement). `make deploy` s'arrête désormais si `make check` échoue (il continuait).
 
+## 2026-10-23 — MySQL 8.4 LTS, conteneur et chemins inchangés
+
+**Décision.** Image `mysql:8.4` (branche LTS, correctifs seulement), montée en place depuis 8.0.
+Le conteneur reste `infra_mysql_8_0`, les chemins `datas/mysql_8_0/` et `configuration/mysql_8_0/`
+aussi. `make check` compare la série en service à celle de `compose.yml`.
+
+**Pourquoi.** La 8.0 est en fin de vie. 8.0.37 et plus → 8.4 est un chemin de mise à niveau en place
+supporté. Inventaire des hôtes avant la montée : tous les comptes en `caching_sha2_password`, aucune
+option retirée en 8.4 dans la config ni dans la commande (conf.d vide), aucun nom de table ou de
+colonne devenu réservé (`MANUAL`, `PARALLEL`, `QUALIFY`, `TABLESAMPLE`), aucune clé étrangère sur
+une clé non unique, ni routine, trigger ou événement. Test sur un hôte local : mise à niveau sans
+erreur, `CHECK TABLE` OK sur toutes les tables, applications et phpMyAdmin identiques, dumps 8.4
+restaurés en 8.4 comme en 8.0.
+
+**Ce que ça exclut.** Tout retour à 8.0 par simple changement d'image : la 8.0 refuse de démarrer
+sur des données passées en 8.4 ; le retour passe par un dump (`docs/RUNBOOK-deploy.md` §4). Tout
+nouveau compte en `mysql_native_password` (désactivé par défaut en 8.4). Renommer le conteneur
+avec la version : c'est l'hôte de base de toutes les applications ; un nom neutre se fera par une
+migration à part, avec un alias réseau le temps que les applications suivent.
+
+**Défauts qui changent sans action** (rien n'est surchargé ici) : `innodb_io_capacity` 200 → 10000,
+`innodb_flush_method` → `O_DIRECT`, `innodb_adaptive_hash_index` et `innodb_change_buffering`
+désactivés, `innodb_log_buffer_size` 64 Mio, `restrict_fk_on_non_standard_key=ON` (une migration qui
+créerait une clé étrangère sur un index non unique échoue désormais).
+
 ## À trancher
 
 - ~~Licence~~ : MIT, tranché le 2026-10-07.
