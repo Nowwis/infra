@@ -21,6 +21,16 @@ requise : nouvelle variable `.env`, `make traefik-config`, cron, ou rien.
   `docker compose pull phpmyadmin && docker compose up -d --no-deps phpmyadmin`.
 
 ### Ajouté
+- `templates/site/` : modèle de site branché sur le socle, un seul jeu de fichiers pour
+  Symfony, WordPress, PrestaShop 9 et HTML statique (`PROJECT_TYPE`, services par
+  `COMPOSE_PROFILES`), prod avec alias `www` optionnel (domaine racine seulement), workflow de
+  déploiement par runner self-hosted. WordPress : `wp-config.local.php` lu dans l'environnement
+  (`WP_ENVIRONMENT_TYPE=local`, `WP_DEBUG_LOG`, `DISABLE_WP_CRON` optionnel), msmtp et wp-cli dans
+  l'image PHP, `mail()` vers Mailpit en local seulement, cibles `db-pull`, `files-pull` et
+  `cache-purge` paramétrées (`REMOTE`, `REMOTE_PROD`, `PROD_URL`, `LOCAL_URL`, préfixe des tables),
+  repli nginx sur `index.php` pour `wp-sitemap.xml` et `robots.txt`. Conteneur nodejs déclaré
+  sain seulement après son installation de démarrage (marqueur posé en fin d'installation). Validé
+  par une installation réelle de chaque type ; 22 tests bats (`tests/site-template.bats`). Action serveur : aucune.
 - **Surveillance Gatus** (profil optionnel `gatus`, `infra_gatus`, `twinproduction/gatus:v5.37.0`) :
   config fournie par l'hôte hors du dépôt (`GATUS_CONFIG_DIR`, montée en lecture seule), exemple neutre
   dans `configuration/gatus/example/`, alertes Telegram, page d'état derrière `gatus-auth`. `make check`

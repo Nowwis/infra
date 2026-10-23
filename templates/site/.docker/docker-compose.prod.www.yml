@@ -1,0 +1,14 @@
+# Prod, domaine racine seulement : www.<domaine> redirige (301) vers <domaine>.
+# Ne jamais l'utiliser pour un sous-domaine : www.<sous-domaine> n'a pas de DNS, le défi ACME
+# échoue en boucle et pollue le journal Traefik.
+services:
+    nginx:
+        labels:
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-www.rule=Host(`www.${COMPOSE_PRODUCTION_DOMAIN}`)"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-www.entrypoints=websecure"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-www.tls=true"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-www.tls.certresolver=le"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-www.middlewares=${COMPOSE_PROJECT_NAME}-www-redirect"
+            - "traefik.http.middlewares.${COMPOSE_PROJECT_NAME}-www-redirect.redirectregex.regex=^https?://www\\.[^/]+(.*)"
+            - "traefik.http.middlewares.${COMPOSE_PROJECT_NAME}-www-redirect.redirectregex.replacement=https://${COMPOSE_PRODUCTION_DOMAIN}$${1}"
+            - "traefik.http.middlewares.${COMPOSE_PROJECT_NAME}-www-redirect.redirectregex.permanent=true"
