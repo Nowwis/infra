@@ -115,6 +115,7 @@ Promis : les noms `infra_traefik`, `infra_mysql_8_0`, `infra_mariadb_11_3`, `inf
 `security-headers@file` et `security-headers-idp@file` ; l'entrypoint `websecure` ; le
 résolveur `le` en prod.
 
-Non promis : un port publié sur l'hôte pour SQL ; une version précise de Traefik au-delà de la
+Non promis : `infra_gatus` (profil optionnel, hors contrat : une application ne s'y branche pas,
+elle est ajoutée à la config Gatus de l'hôte qui la surveille, hors du dépôt) ; un port publié sur l'hôte pour SQL ; une version précise de Traefik au-delà de la
 2.x ; qu'un middleware déclaré dans `dynamic/local/` existe aussi en `prod` (ils sont
 indépendants par construction).

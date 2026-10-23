@@ -14,6 +14,11 @@ setup() {
   cp "$ROOT/configuration/traefik2/config/dynamic/local/main.yaml" "$INFRA_ROOT/configuration/traefik2/config/dynamic/local/"
   cp "$ROOT/configuration/traefik2/config/dynamic/prod/main.yaml" "$INFRA_ROOT/configuration/traefik2/config/dynamic/prod/"
   touch "$INFRA_ROOT/configuration/traefik2/certs/docker.localhost.pem" "$INFRA_ROOT/configuration/traefik2/certs/docker.localhost-key.pem"
+  # Dossier de config gatus fourni par l'hôte : HORS du checkout, rempli avec l'exemple versionné.
+  export GATUS_DIR="$SANDBOX/gatus-config"
+  mkdir -p "$GATUS_DIR"
+  cp "$ROOT/configuration/gatus/example/config.yaml" "$GATUS_DIR/"
+  unset PROFILES COMPOSE_PROFILES
   PATH="$ROOT/bin:$PATH"
 }
 teardown() { rm -rf "$SANDBOX"; }
@@ -56,6 +61,19 @@ PMA_DOMAIN=pma.example.org
 MAILPIT_DOMAIN=mail.example.org
 EOF
 }
+
+# Active le profil gatus avec toutes ses variables.
+gatus_on() {
+  cat >> "$INFRA_ENV_FILE" <<EOF
+COMPOSE_PROFILES=mariadb,gatus
+GATUS_CONFIG_DIR=$GATUS_DIR
+GATUS_DOMAIN=status.docker.test
+TRAEFIK_GATUS_USERS=admin:\$\$2y\$\$05\$\$abcdef
+GATUS_TELEGRAM_TOKEN=123:abc
+GATUS_TELEGRAM_CHAT_ID=42
+EOF
+}
+set_var() { sed -i "s|^$1=.*|$1=$2|" "$INFRA_ENV_FILE"; }
 
 @test "sans .env : échec explicite" {
   run infra-check
@@ -179,4 +197,118 @@ EOF
   run infra-check
   [ "$status" -eq 0 ]
   [[ "$output" == *"toléré en local"* ]]
+}
+
+@test "gatus : profil inactif, variables gatus non exigées" {
+  env_local
+  run infra-check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"profil gatus inactif"* ]]
+}
+
+@test "gatus : profil actif via COMPOSE_PROFILES du .env, complet : OK" {
+  env_local; gatus_on
+  run infra-check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"présent, hors du dépôt"* ]]
+  [[ "$output" == *"variables référencées toutes transmises"* ]]
+}
+
+@test "gatus : profil actif via PROFILES (make up PROFILES=gatus)" {
+  env_local
+  PROFILES=gatus run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GATUS_CONFIG_DIR vide"* ]]
+}
+
+@test "gatus : profil actif via COMPOSE_PROFILES de l'environnement" {
+  env_local
+  COMPOSE_PROFILES=gatus run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GATUS_CONFIG_DIR vide"* ]]
+}
+
+@test "gatus : TRAEFIK_GATUS_USERS vide : échec (page d'état en 404)" {
+  env_local; gatus_on; set_var TRAEFIK_GATUS_USERS ""
+  run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"TRAEFIK_GATUS_USERS vide"* ]]
+}
+
+@test "gatus : jeton Telegram vide : échec (Gatus n'alerterait jamais, sans erreur)" {
+  env_local; gatus_on; set_var GATUS_TELEGRAM_TOKEN ""; set_var GATUS_TELEGRAM_CHAT_ID ""
+  run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GATUS_TELEGRAM_TOKEN vide"* ]]
+  [[ "$output" == *"GATUS_TELEGRAM_CHAT_ID vide"* ]]
+}
+
+@test "gatus : hash avec \$ non doublé : échec" {
+  env_local; gatus_on; set_var TRAEFIK_GATUS_USERS 'admin:$2y$05$abcdef'
+  run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"TRAEFIK_GATUS_USERS contient un"* ]]
+}
+
+@test "gatus : GATUS_CONFIG_DIR relatif : échec" {
+  env_local; gatus_on; set_var GATUS_CONFIG_DIR "configuration/gatus/example"
+  run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"chemin absolu attendu"* ]]
+}
+
+@test "gatus : GATUS_CONFIG_DIR absent : échec nommant le dossier" {
+  env_local; gatus_on; set_var GATUS_CONFIG_DIR "$SANDBOX/nulle-part"
+  run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"dossier $SANDBOX/nulle-part absent"* ]]
+}
+
+@test "gatus : GATUS_CONFIG_DIR dans le checkout (exemple versionné) : échec" {
+  env_local; gatus_on
+  mkdir -p "$INFRA_ROOT/configuration/gatus/example"
+  cp "$GATUS_DIR/config.yaml" "$INFRA_ROOT/configuration/gatus/example/"
+  set_var GATUS_CONFIG_DIR "$INFRA_ROOT/configuration/gatus/example"
+  run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"est dans le checkout"* ]]
+}
+
+@test "gatus : GATUS_CONFIG_DIR = lien symbolique vers le checkout : échec" {
+  env_local; gatus_on
+  ln -s "$INFRA_ROOT" "$SANDBOX/lien"
+  set_var GATUS_CONFIG_DIR "$SANDBOX/lien"
+  run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"est dans le checkout"* ]]
+}
+
+@test "gatus : dossier sans .yaml : échec" {
+  env_local; gatus_on; mkdir -p "$SANDBOX/vide"; set_var GATUS_CONFIG_DIR "$SANDBOX/vide"
+  run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ne contient aucun .yaml"* ]]
+}
+
+@test "gatus : config référençant une variable non transmise au conteneur : échec" {
+  env_local; gatus_on
+  printf 'endpoints:\n  - name: x\n    url: "https://${SITE_DOMAIN}"\n    headers:\n      Authorization: "$API_TOKEN"\n    body: "$$literal"\n' \
+    > "$GATUS_DIR/extra.yaml"
+  run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"non transmise(s) au conteneur : API_TOKEN SITE_DOMAIN"* ]]
+  [[ "$output" != *"literal"* ]]
+}
+
+@test "gatus : GATUS_DOMAIN identique à MONITORING_DOMAIN : échec" {
+  env_local; gatus_on; set_var GATUS_DOMAIN monitoring.docker.test
+  run infra-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GATUS_DOMAIN = MONITORING_DOMAIN"* ]]
+}
+
+@test "gatus : l'exemple versionné passe les contrôles fichier en prod" {
+  env_prod; gatus_on
+  run infra-check
+  [ "$status" -eq 0 ]
 }

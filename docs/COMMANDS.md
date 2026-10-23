@@ -12,13 +12,13 @@ depuis la racine du clone (`~/infra` sur un hôte).
 | `make help` | Liste les cibles | |
 | `make networks` | Crée `traefik`, `databases`, `mailer` s'ils manquent, puis les liste | Une fois par hôte ; sans danger à relancer |
 | `make certs` | Génère le certificat mkcert `*.docker.test` dans `certs/` | Une fois en local ; après `mkcert -install` |
-| `make check` | `bin/infra-check` : `.env`, variables, hash, config de l'ENV, réseaux, `compose config` | Avant tout `up`, `traefik-config`, `deploy` (ils l'appellent) |
-| `make up [PROFILES=mariadb]` | `check` puis `docker compose up -d` | Premier démarrage, ou après un changement de `compose.yml` |
+| `make check` | `bin/infra-check` : `.env`, variables, hash, config de l'ENV, réseaux, `compose config`, config Gatus si le profil est actif | Avant tout `up`, `traefik-config`, `deploy` (ils l'appellent) |
+| `make up [PROFILES=mariadb]` (ou `COMPOSE_PROFILES` dans `.env`) | `check` puis `docker compose up -d` | Premier démarrage, ou après un changement de `compose.yml` |
 | `make down` | `docker compose down` : conteneurs et réseau interne ; **réseaux externes et `datas/` intacts** | Maintenance ; les applications perdent le proxy et SQL le temps de l'arrêt |
 | `make ps` | État des conteneurs du socle | |
 | `make logs [S=service]` | Journaux (`reverse-proxy` par défaut) | Diagnostic |
 | `make traefik-config` | `check` puis recréation **du seul** reverse proxy | Après un changement de **config statique** (`traefik.<ENV>.yaml`) ou des volumes/ports |
-| `make deploy` | `git pull --ff-only`, `check`, puis `traefik-config` **seulement si** `compose.yml` ou la config statique ont changé | Mise à jour d'un hôte |
+| `make deploy` | `git pull --ff-only`, `check` (**arrêt** s'il échoue), puis `traefik-config` **seulement si** `compose.yml` ou la config statique ont changé ; `up -d gatus` si le profil est actif | Mise à jour d'un hôte |
 | `make test` | `bats tests/` | Avant une PR |
 
 ### Scripts
@@ -103,6 +103,20 @@ make up PROFILES=mariadb          # ou : docker compose --profile mariadb up -d 
 Sans le profil, `make up` ne touche pas MariaDB s'il tourne déjà ; `make down` l'arrête.
 phpMyAdmin propose les deux moteurs en permanence ; l'entrée MariaDB échoue simplement si le
 conteneur est absent.
+
+### Activer la surveillance Gatus sur un hôte
+
+```bash
+mkdir -p <dossier-hors-du-dépôt>   # fourni par l'hôte ; forme : configuration/gatus/example/config.yaml
+$EDITOR .env    # COMPOSE_PROFILES=gatus (ou mariadb,gatus), GATUS_CONFIG_DIR=<chemin absolu>,
+                # GATUS_DOMAIN, TRAEFIK_GATUS_USERS, GATUS_TELEGRAM_TOKEN, GATUS_TELEGRAM_CHAT_ID
+make check      # fait charger la config par l'image Gatus (refus = rien n'est démarré)
+make up
+docker logs -f infra_gatus | grep -E 'success=false|alert'
+```
+Ajouter ou modifier un point de contrôle : éditer le fichier dans `GATUS_CONFIG_DIR`, `make check` ;
+Gatus le recharge à chaud. Retirer un **fichier** : `docker restart infra_gatus` (Gatus ne voit pas
+une suppression).
 
 ### Renommer des bases vers la convention `<env>_<slug>`
 

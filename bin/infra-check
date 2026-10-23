@@ -8,12 +8,16 @@
 #   3. aucun `$` seul dans un hash basic-auth (Compose le tronquerait en silence)
 #   4. traefik.<ENV>.yaml et le dossier dynamic/<ENV>/ avec au moins un *.yaml
 #   5. ENV=local : certificat mkcert présent ; ENV=prod : TRAEFIK_DASHBOARD_INSECURE=false
-#   6. réseaux externes traefik, databases, mailer (si docker est disponible)
-#   7. `docker compose config` valide (si docker est disponible)
+#   6. profil gatus actif (COMPOSE_PROFILES du .env ou de l'environnement, ou PROFILES de make) :
+#      variables, dossier GATUS_CONFIG_DIR (absolu, hors du checkout, au moins un .yaml),
+#      variables référencées par la config
+#   7. réseaux externes traefik, databases, mailer (si docker est disponible)
+#   8. `docker compose config` valide (si docker est disponible)
+#   9. profil gatus : la config est chargée par l'image Gatus elle-même (si docker est disponible)
 #
 # Sortie : 0 tout est bon · 1 au moins un échec (liste complète affichée, pas d'arrêt au premier).
 # Variables : INFRA_ROOT (défaut : dossier parent), INFRA_ENV_FILE (défaut : $INFRA_ROOT/.env),
-# INFRA_SKIP_DOCKER=1 pour ignorer les contrôles 6 et 7 (tests, hôte sans docker).
+# INFRA_SKIP_DOCKER=1 pour ignorer les contrôles 7 à 9 (tests, hôte sans docker).
 set -uo pipefail
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 : "${INFRA_ROOT:=$(cd "$(dirname "$SELF")/.." && pwd)}"
@@ -62,7 +66,7 @@ esac
 [ "$env" = prod ] && [ "$(v LETSENCRYPT_EMAIL)" = "you@example.com" ] && fail "LETSENCRYPT_EMAIL est la valeur d'exemple"
 
 # --- 3. hash basic-auth : `$` non doublé --------------------------------------
-for k in TRAEFIK_DASHBOARD_USERS TRAEFIK_MAILPIT_USERS TRAEFIK_PHPMYADMIN_USERS; do
+for k in TRAEFIK_DASHBOARD_USERS TRAEFIK_MAILPIT_USERS TRAEFIK_PHPMYADMIN_USERS TRAEFIK_GATUS_USERS; do
   h="$(v "$k")"
   [ -n "$h" ] || continue
   # Un `$` suivi d'autre chose qu'un `$`, ou un `$` final, sera interprété par Compose.
@@ -98,14 +102,88 @@ if [ "$env" = prod ]; then
   [ -n "$(v TRAEFIK_BIND)" ] && printf '  i TRAEFIK_BIND=%s : écoute restreinte sur un serveur prod, voulu ?\n' "$(v TRAEFIK_BIND)"
 fi
 
-# --- 6 & 7. docker -------------------------------------------------------------
+# --- 6. Gatus (profil optionnel) -----------------------------------------------
+# Image lue dans compose.yml (même version que celle déployée) ; variables transmises au conteneur
+# par le service gatus de compose.yml : à garder alignées.
+GATUS_IMAGE="$(grep -oE 'twinproduction/gatus:[^ "]+' "$INFRA_ROOT/compose.yml" 2>/dev/null | head -1)"
+: "${GATUS_IMAGE:=twinproduction/gatus:latest}"
+GATUS_PASSED_VARS="GATUS_TELEGRAM_TOKEN GATUS_TELEGRAM_CHAT_ID"
+gatus=0
+for p in $(printf '%s %s %s' "${PROFILES:-}" "${COMPOSE_PROFILES:-}" "$(v COMPOSE_PROFILES)" | tr ',' ' '); do
+  [ "$p" = gatus ] && gatus=1
+done
+gatus_dir=""
+if [ "$gatus" = 1 ]; then
+  for k in GATUS_CONFIG_DIR GATUS_DOMAIN TRAEFIK_GATUS_USERS $GATUS_PASSED_VARS; do
+    # Telegram vide : Gatus démarre quand même et ignore le fournisseur, sans alerte ni erreur.
+    if [ -n "$(v "$k")" ]; then ok "$k renseignée (gatus)"; else fail "$k vide ou absente (profil gatus)"; fi
+  done
+  [ -n "$(v GATUS_DOMAIN)" ] && [ "$(v GATUS_DOMAIN)" = "$(v MONITORING_DOMAIN)" ] \
+    && fail "GATUS_DOMAIN = MONITORING_DOMAIN : deux routeurs sur le même hôte"
+  dir="$(v GATUS_CONFIG_DIR)"
+  if [ -n "$dir" ]; then
+    # La liste surveillée est propre à l'hôte : jamais dans le checkout (versionnée ou écrasée par
+    # un git pull). Chemin absolu, car Compose résoudrait un relatif par rapport au dépôt.
+    root_real="$(readlink -f "$INFRA_ROOT")"
+    dir_real="$(readlink -f "$dir" 2>/dev/null || true)"
+    if [[ "$dir" != /* ]]; then
+      fail "GATUS_CONFIG_DIR='$dir' : chemin absolu attendu (dossier fourni par l'hôte, hors du dépôt)"
+    elif [ ! -d "$dir" ]; then
+      fail "GATUS_CONFIG_DIR : dossier $dir absent"
+    elif [ "$dir_real" = "$root_real" ] || [[ "$dir_real" == "$root_real"/* ]]; then
+      fail "GATUS_CONFIG_DIR=$dir est dans le checkout : la config de l'hôte vit hors du dépôt"
+    elif ! ls "$dir"/*.yaml >/dev/null 2>&1; then
+      fail "GATUS_CONFIG_DIR : $dir ne contient aucun .yaml (forme : configuration/gatus/example/)"
+    else
+      gatus_dir="$dir_real"
+      ok "GATUS_CONFIG_DIR : $dir présent, hors du dépôt"
+      # Une variable non transmise au conteneur serait remplacée par du vide, sans erreur.
+      unknown=""
+      for var in $(sed 's/\$\$//g' "$gatus_dir"/*.yaml | grep -oE '\$\{?[A-Za-z_][A-Za-z0-9_]*' | tr -d '${' | sort -u); do
+        case " $GATUS_PASSED_VARS " in *" $var "*) ;; *) unknown="$unknown $var" ;; esac
+      done
+      if [ -n "$unknown" ]; then fail "config gatus : variable(s) non transmise(s) au conteneur :$unknown (compose.yml, service gatus)"
+      else ok "config gatus : variables référencées toutes transmises"; fi
+    fi
+  fi
+else
+  printf '  i profil gatus inactif\n'
+fi
+
+# --- 7 à 9. docker -------------------------------------------------------------
 if [ "$INFRA_SKIP_DOCKER" != 1 ] && command -v docker >/dev/null 2>&1; then
   for n in traefik databases mailer; do
     docker network inspect "$n" >/dev/null 2>&1 && ok "réseau $n présent" || fail "réseau $n absent (make networks)"
   done
-  if (cd "$INFRA_ROOT" && docker compose config -q 2>/tmp/infra-check.$$); then ok "docker compose config valide"
+  if (cd "$INFRA_ROOT" && docker compose --env-file "$INFRA_ENV_FILE" config -q 2>/tmp/infra-check.$$); then ok "docker compose config valide"
   else fail "docker compose config : $(tr '\n' ' ' < /tmp/infra-check.$$ | cut -c1-200)"; fi
   rm -f /tmp/infra-check.$$
+  # Gatus valide sa config au démarrage et sort en erreur si elle est invalide ; un rechargement
+  # invalide l'arrête. On la fait donc charger par l'image, sans réseau ni secret réel, avant de
+  # déployer : « Listening » = config acceptée.
+  if [ "$gatus" = 1 ] && [ -n "$gatus_dir" ]; then
+    name="infra-gatus-check-$$"
+    if docker run -d --name "$name" --network none --tmpfs /data -e GATUS_CONFIG_PATH=/config \
+         -e GATUS_TELEGRAM_TOKEN=0:check -e GATUS_TELEGRAM_CHAT_ID=0 \
+         -v "$gatus_dir:/config:ro" "$GATUS_IMAGE" >/dev/null 2>/tmp/infra-check.$$; then
+      verdict=""
+      for _ in $(seq 1 30); do
+        logs="$(docker logs "$name" 2>&1)"
+        if grep -q 'Listening on' <<<"$logs"; then verdict=ok; break; fi
+        [ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" = true ] || { verdict=ko; break; }
+        sleep 0.5
+      done
+      logs="$(docker logs "$name" 2>&1)"
+      docker rm -f "$name" >/dev/null 2>&1
+      case "$verdict" in
+        ok) ok "config gatus acceptée par $GATUS_IMAGE ($(grep -oE 'Validated [0-9]+ endpoints' <<<"$logs" | head -1))" ;;
+        *)  fail "config gatus refusée : $(grep -E 'panic|error' <<<"$logs" | head -1 | cut -c1-200)" ;;
+      esac
+    else
+      fail "gatus : impossible de lancer $GATUS_IMAGE : $(tr '\n' ' ' < /tmp/infra-check.$$ | cut -c1-200)"
+    fi
+    rm -f /tmp/infra-check.$$
+  fi
 else
   printf '  i contrôles docker ignorés\n'
 fi

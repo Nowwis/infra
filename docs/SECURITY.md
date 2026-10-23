@@ -7,12 +7,15 @@
 | Tableau de bord Traefik | ouvert (`insecure=true`), **écoute restreinte obligatoire** (`TRAEFIK_BIND`) | basic-auth `auth`, `insecure=false` |
 | phpMyAdmin | basic-auth dédié (**obligatoire**, sinon 404) | idem |
 | Mailpit | libre ou `mailpit-auth` selon `.env` | basic-auth `mailpit-auth` |
+| Gatus (profil) | basic-auth dédié `gatus-auth` (**obligatoire**, sinon 404) | idem |
 | MySQL / MariaDB | réseau `databases` uniquement, aucun port hôte | idem |
 | SMTP Mailpit | réseau `mailer` uniquement | idem |
 | Sites applicatifs | selon leurs labels | selon leurs labels |
 
 Règles :
 
+- **Un secret basic-auth par outil.** La page d'état Gatus liste tous les domaines surveillés : elle a
+  le sien (`TRAEFIK_GATUS_USERS`).
 - **Trois secrets basic-auth différents.** phpMyAdmin ouvre toutes les bases de l'hôte ; il ne
   partage pas le mot de passe d'un écran de supervision ni d'un capteur de mails.
 - **Échec fermé.** Une variable `*_USERS` vide rend le middleware invalide et le routeur est
@@ -33,6 +36,8 @@ Règles :
 | Certificat et clé mkcert | `configuration/traefik2/certs/` | non |
 | Comptes et clés Let's Encrypt | `letsencrypt/acme.json` (root, 600) | non |
 | Config du contrôle de restauration (clé d'API mail, hôtes, bases) | `ops/backup-check/backup.env.<hote>` | non |
+| Jeton Telegram de Gatus | `.env` (`GATUS_TELEGRAM_TOKEN`) | non |
+| Liste surveillée par Gatus (domaines, hôtes) | `GATUS_CONFIG_DIR`, hors du dépôt | non |
 | Historique de volumétrie | `ops/backup-check/.restore-history.csv` | non |
 
 Ce que le dépôt versionne ne contient **aucun** secret, **aucun** nom d'hôte réel, **aucun**
