@@ -165,6 +165,27 @@ migration à part, avec un alias réseau le temps que les applications suivent.
 désactivés, `innodb_log_buffer_size` 64 Mio, `restrict_fk_on_non_standard_key=ON` (une migration qui
 créerait une clé étrangère sur un index non unique échoue désormais).
 
+## 2026-10-24 — Chemins cachés refusés par Traefik, pour tous les hôtes
+
+**Décision.** Un routeur fichier `deny-dotfiles`, identique en `local` et en `prod`, répond 403 à
+tout chemin qui commence par un point, sauf `/.well-known/` : règle
+`PathRegexp(`^/\.`) && !PathPrefix(`/.well-known/`)`, priorité 100000, middleware `deny-all`
+(`ipAllowList` sur `127.0.0.1/32`), service `noop@internal`, `websecure` seul, `tls: {}`. Le modèle
+de site refuse les mêmes chemins dans ses quatre configs nginx, en premier bloc regex.
+
+**Pourquoi.** Des applications publient la racine de leur dépôt comme racine web (CMS installés à la
+racine, sites statiques sans `public/`) : leur `.env` de compose et leur dossier `.git` étaient
+téléchargeables. Le correctif applicatif (règle nginx/apache, racine `public/`) est indispensable
+mais dépend de chaque dépôt ; la règle au proxy couvre tout ce qui est derrière lui, tout de suite,
+y compris une application qui oublie ou casse la sienne. Pas d'opt-in comme pour les en-têtes de
+sécurité : aucun site légitime ne sert `/.git/` ni `/.env`, et un oubli d'opt-in est exactement la
+faille à fermer.
+
+**Ce que ça exclut.** Servir un chemin caché autre que `/.well-known/` (le faire par un routeur
+d'hôte plus prioritaire, limité à un `Host` et un chemin). Un `/.well-known` sans barre finale est
+refusé (aucun usage connu). Ne couvre ni les fichiers sensibles sans point en tête ni le trafic qui
+contourne Traefik : d'où la règle applicative maintenue en parallèle.
+
 ## À trancher
 
 - ~~Licence~~ : MIT, tranché le 2026-10-07.

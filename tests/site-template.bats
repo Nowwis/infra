@@ -212,3 +212,25 @@ nodejs_command() {
   [[ "$output" == *"retries: 60"* ]]
   [[ "$output" != *".yarn-integrity"* ]]
 }
+
+@test "chaque config nginx refuse les chemins cachés sauf /.well-known/, en premier bloc regex" {
+  for t in html symfony wordpress prestashop; do
+    first="$(grep -m1 -E '^\s+location ~' "$T/.docker/nginx/$t.conf")"
+    [[ "$first" == *'location ~ /\.(?!well-known/) {'* ]] || { echo "$t : $first"; return 1; }
+  done
+}
+
+@test "html : nginx refuse /.git/ et /.docker/, sert /.well-known/ et la page" {
+  w="$BATS_TEST_TMPDIR/www"
+  mkdir -p "$w/public/.git" "$w/public/.docker" "$w/public/.well-known"
+  echo ok > "$w/public/index.html"; echo ref > "$w/public/.git/HEAD"
+  echo secret > "$w/public/.docker/x.json"; echo acme > "$w/public/.well-known/x"
+  run docker run --rm -v "$T/.docker/nginx/html.conf:/etc/nginx/nginx.conf:ro" -v "$w:/var/www:ro" \
+    nginx:alpine sh -c '(nginx &) ; sleep 1; for p in / /.git/HEAD /.docker/x.json /.well-known/x; do
+      printf "%s %s\n" "$p" "$(wget -S -q -O /dev/null "http://127.0.0.1$p" 2>&1 | grep -o "HTTP/1.1 [0-9]*" | head -1 | cut -d" " -f2)"; done'
+  echo "$output"
+  [[ "$output" == *"/ 200"* ]]
+  [[ "$output" == *"/.git/HEAD 403"* ]]
+  [[ "$output" == *"/.docker/x.json 403"* ]]
+  [[ "$output" == *"/.well-known/x 200"* ]]
+}

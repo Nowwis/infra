@@ -23,6 +23,15 @@ requise : nouvelle variable `.env`, `make traefik-config`, cron, ou rien.
   arguments, à réécrire dans les applications avant la montée.
 
 ### Sécurité
+- Traefik refuse en **403** tout chemin caché (`/.git/`, `/.env`, `/.docker/`…) sauf `/.well-known/`,
+  pour tous les hôtes et dans les deux ENV (`dynamic/<ENV>/deny-dotfiles.yaml`, routeur prioritaire
+  sans `Host`). Le modèle de site refuse les mêmes chemins dans ses quatre configs nginx (premier bloc
+  regex, `/.well-known/` servi). Tests : `tests/traefik-dynamic.bats`, `tests/site-template.bats`.
+  **Action serveur** : `git pull` (rechargé à chaud, aucune recréation), puis supprimer tout fichier
+  d'hôte `dynamic/<ENV>/99-host*.yaml` qui ne faisait que cela (redondant : tant qu'il reste, un
+  routeur ou un middleware homonyme est ignoré par Traefik avec un avertissement « already configured,
+  skipping », la protection ne s'interrompt pas).
+  Contrôle : `curl -I https://<domaine>/.git/HEAD` → 403, la page d'accueil inchangée.
 - phpMyAdmin passe sur l'image officielle `phpmyadmin:5.2` (PHP 8.3.36, correctif PHP2Shell) ;
   `phpmyadmin/phpmyadmin` n'est plus mise à jour. **Action serveur** : `git pull`, puis
   `docker compose pull phpmyadmin && docker compose up -d --no-deps phpmyadmin`.

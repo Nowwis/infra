@@ -112,6 +112,11 @@ pas entrer en collision avec un autre projet de l'hôte.
 5. Le mail de test arrive dans Mailpit (local) ou chez le destinataire (prod).
 6. Le projet n'a **aucun** `container_name`, aucun `ports:` publié sur l'hôte, aucun service
    base/proxy/mail à lui.
+7. Le serveur web de l'application refuse les chemins cachés, sauf `/.well-known/`, même sans
+   Traefik devant : nginx `location ~ /\.(?!well-known/) { deny all; }` en **premier** bloc regex
+   du `server` (nginx retient le premier qui correspond : un bloc `\.(json|txt)$` placé avant
+   servirait un fichier caché) ; apache `RedirectMatch 404 /\.(?!well-known/)`. La racine web est
+   `public/` dès que le framework le permet. `curl -I https://<domaine>/.git/HEAD` répond 403 ou 404.
 
 ## 6. Ce que le socle promet, et ce qu'il ne promet pas
 
@@ -119,7 +124,8 @@ Promis : les noms `infra_traefik`, `infra_mysql_8_0`, `infra_mariadb_11_3`, `inf
 `infra_phpmyadmin` ; les réseaux `traefik`, `databases`, `mailer` ; les middlewares
 `security-headers@file` et `security-headers-idp@file` **en prod** (absents en local : un
 label qui les cite y rend le routeur invalide, donc un 404) ; l'entrypoint `websecure` ; le
-résolveur `le` en prod.
+résolveur `le` en prod ; le refus en 403 de tout chemin caché hors `/.well-known/`, sur tous les
+hôtes et dans les deux ENV (`SECURITY.md` §5), qui ne dispense pas l'application du point 7 du §5.
 
 Non promis : `infra_gatus` (profil optionnel, hors contrat : une application ne s'y branche pas,
 elle est ajoutée à la config Gatus de l'hôte qui la surveille, hors du dépôt) ; un port publié sur l'hôte pour SQL ; une version précise de Traefik au-delà de la
