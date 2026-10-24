@@ -78,6 +78,24 @@ ni `sudo`.
 **Décision.** Le moteur SQL n'a rien à faire sur le réseau que Traefik route ; `DEBUG` en prod
 remplit le disque et expose des détails inutiles.
 
+## 2026-10-21 — Version PHP figée dans le dépôt, jamais dans `.docker/.env`
+
+**Décision.** La version PHP s'écrit une seule fois, dans le `FROM` du Dockerfile PHP
+(`FROM php:8.4-fpm`). Pas de `PHP_VERSION` dans `.docker/.env`, ni en argument de build, ni
+dans le tag d'image. Le déploiement reconstruit avec `--pull` (script de déploiement)
+pour suivre les correctifs de la branche.
+
+**Pourquoi.** `.docker/.env` n'est pas synchronisé par le déploiement : une version qui y vit
+ne peut pas changer en même temps que le code. Avant le merge, le serveur vise un dossier ou
+une image qui n'existe pas encore ; après, l'ancien a été supprimé par `rsync --delete`. Dans
+les deux cas, intervention manuelle en prod, serveur par serveur. La version fait partie du
+code (les corrections de compatibilité vont avec elle) : elle doit être relue, testée par la
+CI et annulable par un revert. Une variable par hôte est enfin la cause des écarts constatés
+entre local, dev et prod lors de PHP2Shell (CVE-2026-109618/109619).
+
+**Ce que ça exclut.** Faire tourner un environnement sur une autre version sans commit : on
+passe par une branche déployée sur `develop`.
+
 ## 2026-10-22 — phpMyAdmin : image officielle `phpmyadmin:5.2`
 
 **Décision.** L'image Docker officielle (`phpmyadmin`, dépôt library) remplace `phpmyadmin/phpmyadmin`.

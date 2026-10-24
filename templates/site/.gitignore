@@ -1,0 +1,18 @@
+# Configuration et journaux locaux
+/.docker/.env
+.env.local
+.env.*.local
+
+# Dépendances et caches
+/vendor/
+/node_modules/
+/var/
+
+# IDE
+.idea/
+.vscode/
+
+# WordPress : configuration locale (copie de .docker/wp-config.local.php), journal, médias copiés
+/wp-config.php
+/wp-content/debug.log
+/wp-content/uploads/

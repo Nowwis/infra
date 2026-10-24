@@ -1,0 +1,81 @@
+# Local : services applicatifs seulement, branchés sur le socle (docs/CONTRACT.md).
+services:
+    php:
+        profiles: [php]
+        build:
+            context: ./php
+            args:
+                COMPOSER_VERSION: ${COMPOSER_VERSION}
+                ENABLE_XDEBUG: ${ENABLE_XDEBUG}
+                UID: ${UID}
+                GID: ${GID}
+        image: ${COMPOSE_PROJECT_NAME}-php
+        volumes:
+            - ${APP_FOLDER}:/var/www
+            - ./php/90-extra-config.ini:/usr/local/etc/php/conf.d/90-extra-config.ini
+            - ./php/91-local-mail.ini:/usr/local/etc/php/conf.d/91-local-mail.ini
+        # Lus par .docker/wp-config.local.php (WordPress) ; vides et sans effet pour les autres types.
+        environment:
+            COMPOSE_PROJECT_DOMAIN: ${COMPOSE_PROJECT_DOMAIN}
+            WORDPRESS_DB_HOST: ${WORDPRESS_DB_HOST:-}
+            WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME:-}
+            WORDPRESS_DB_USER: ${WORDPRESS_DB_USER:-}
+            WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD:-}
+            WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-}
+            WORDPRESS_DISABLE_CRON: ${WORDPRESS_DISABLE_CRON:-0}
+        networks: [project_network, databases, mailer]
+
+    nginx:
+        build:
+            context: ./nginx
+        volumes:
+            - ${APP_FOLDER}:/var/www
+            - ./nginx/${PROJECT_TYPE}.conf:/etc/templates/nginx.conf
+        environment:
+            ADMIN_FOLDER_PRESTASHOP: ${ADMIN_FOLDER_PRESTASHOP}
+        depends_on:
+            php:
+                condition: service_started
+                required: false
+        labels:
+            - "traefik.enable=true"
+            - "traefik.docker.network=traefik"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.rule=Host(`${COMPOSE_PROJECT_DOMAIN}`)"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.entrypoints=${TRAEFIK_ENTRYPOINT}"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls=true"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
+            - "traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=80"
+        networks: [project_network, traefik]
+
+    nodejs:
+        profiles: [assets]
+        image: node:22
+        user: "${UID}:${GID}"
+        working_dir: /var/www
+        environment:
+            - NODE_ENV=development
+        volumes:
+            - ${APP_FOLDER}:/var/www
+        # Pas de watch résident : il coûte 640 à 865 Mio par stack pour des assets qui changent
+        # rarement. Le conteneur installe les dépendances puis reste inactif ; on compile à la
+        # demande (make yarn-dev, make yarn-build).
+        # Sain seulement une fois l'installation de démarrage finie : un marqueur posé à la fin
+        # (.yarn-integrity survit à l'installation précédente et ne prouve rien). Un second
+        # `yarn install` lancé pendant le premier corromprait le cache.
+        command: sh -c "rm -f node_modules/.install-complete && if [ -f package.json ]; then yarn install; fi && mkdir -p node_modules && touch node_modules/.install-complete && exec tail -f /dev/null"
+        healthcheck:
+            test: ["CMD", "test", "-f", "/var/www/node_modules/.install-complete"]
+            interval: 5s
+            timeout: 3s
+            retries: 60
+            start_period: 5s
+        networks: [project_network]
+
+networks:
+    project_network:
+    databases:
+        external: true
+    mailer:
+        external: true
+    traefik:
+        external: true

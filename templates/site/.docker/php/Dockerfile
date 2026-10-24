@@ -1,0 +1,35 @@
+# Version PHP figée ici, seul endroit : elle suit le code (relue en PR, testée, revert possible).
+# Jamais dans .docker/.env, que le déploiement ne synchronise pas (docs/DECISIONS.md, 2026-10-21).
+FROM php:8.4-fpm
+
+ARG UID=1000
+ARG GID=1000
+
+# Extensions communes à Symfony, WordPress et PrestaShop 9 (gd, intl, zip, pdo_mysql, mysqli,
+# exif, bcmath, opcache) ; pcntl : arrêt propre du worker Messenger sur SIGTERM.
+# msmtp : sendmail minimal ; en local, php/91-local-mail.ini y envoie mail() vers Mailpit.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git unzip curl msmtp \
+        libzip-dev libpng-dev libfreetype6-dev libjpeg62-turbo-dev libwebp-dev libicu-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
+    && docker-php-ext-install -j"$(nproc)" pdo_mysql mysqli zip gd intl exif bcmath opcache pcntl \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG COMPOSER_VERSION=2
+RUN curl -sS https://getcomposer.org/installer \
+    | php -- --install-dir=/usr/local/bin --filename=composer --${COMPOSER_VERSION}
+
+# wp-cli dans l'image : WordPress (make core, db-pull, search-replace) en dépend ; inerte ailleurs.
+RUN curl -sSLo /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar \
+    && chmod +x /usr/local/bin/wp
+
+ARG ENABLE_XDEBUG=0
+RUN if [ "${ENABLE_XDEBUG}" = "1" ]; then pecl install xdebug && docker-php-ext-enable xdebug; fi
+
+RUN groupadd -g "${GID}" devgroup && useradd -u "${UID}" -g "${GID}" -m -s /bin/bash devuser
+
+USER devuser
+WORKDIR /var/www
+EXPOSE 9000
+CMD ["php-fpm"]

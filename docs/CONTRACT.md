@@ -6,6 +6,10 @@ serveur de mail.
 
 ## 1. Compose minimal
 
+Point de départ complet et testé : [`templates/site/`](../templates/site/README.md) (Symfony,
+WordPress, PrestaShop, HTML statique). L'exemple ci-dessous en est le cœur.
+
+
 ```yaml
 # .docker/docker-compose.yml d'une application
 services:
@@ -23,6 +27,7 @@ services:
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.entrypoints=${TRAEFIK_ENTRYPOINT}"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls=true"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
+      # Prod seulement : le middleware n'est déclaré que dans dynamic/prod/ (voir §6).
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.middlewares=security-headers@file"
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=80"
       - "traefik.docker.network=traefik"
@@ -112,7 +117,8 @@ pas entrer en collision avec un autre projet de l'hôte.
 
 Promis : les noms `infra_traefik`, `infra_mysql_8_0`, `infra_mariadb_11_3`, `infra_mailer`,
 `infra_phpmyadmin` ; les réseaux `traefik`, `databases`, `mailer` ; les middlewares
-`security-headers@file` et `security-headers-idp@file` ; l'entrypoint `websecure` ; le
+`security-headers@file` et `security-headers-idp@file` **en prod** (absents en local : un
+label qui les cite y rend le routeur invalide, donc un 404) ; l'entrypoint `websecure` ; le
 résolveur `le` en prod.
 
 Non promis : `infra_gatus` (profil optionnel, hors contrat : une application ne s'y branche pas,
