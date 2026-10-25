@@ -44,7 +44,9 @@ Le site répond sur `https://<COMPOSE_PROJECT_NAME>.docker.test` (certificat mkc
 - **Prod** : `make ENV=prod …` utilise `docker-compose.prod.yml` (Let's Encrypt,
   `security-headers@file`, redémarrage automatique). `PROD_WWW_ALIAS=1` ajoute la redirection
   `www.` → domaine, **pour un domaine racine seulement** : `www.<sous-domaine>` n'a pas de DNS
-  et ferait échouer le certificat en boucle.
+  et ferait échouer le certificat en boucle. `TRAEFIK_ALIAS_RULE` remplace cette règle par une
+  liste d'hôtes libre (autres domaines redirigés), `TRAEFIK_AUTH_USERS` ajoute une basic auth
+  (environnement de développement, voir « Déploiement »).
 - **Worker Messenger** (Symfony, prod) : `COMPOSE_PROFILES=php,worker`.
 
 ## WordPress
@@ -83,8 +85,35 @@ make db-create                             # base et compte WORDPRESS_DB_* sur l
 
 ## Déploiement
 
-`.github/workflows/deploy.yml` : `main` → environnement GitHub `prod`, `develop` → `preprod`,
-sur un runner self-hosted installé sur le serveur (labels `self-hosted` + `prod`/`preprod`).
-Le job fait `git reset --hard origin/<branche>` dans `vars.VPS_DEPLOY_DIR`, lance
-`make ENV=prod deploy`, puis vérifie `vars.SITE_URL`. Le répertoire de prod est un clone git
-avec son propre `.docker/.env`. Installer le runner est une opération serveur, hors modèle.
+Le modèle ne fournit pas de déploiement : pas de workflow CI, pas de script. L'outil de
+déploiement de l'hôte l'ajoute au moment de créer le dépôt du site (workflow, script, accès au
+serveur), parce que la façon d'atteindre un serveur dépend de l'hôte, pas du site.
+
+Ce qu'un déploiement attend du modèle, quel que soit l'outil :
+
+- **Un dossier par environnement sur le serveur** (prod, et dev s'il existe), qui reçoit le code
+  du dépôt et garde **son propre `.docker/.env`**, jamais versionné ni écrasé par le déploiement
+  (comme `vendor/`, `var/`, les uploads, `wp-config.php` : à exclure de toute synchronisation).
+  Le `.env` de prod : `COMPOSE_PROJECT_NAME`, `COMPOSE_PRODUCTION_DOMAIN`, `PROD_WWW_ALIAS` ou
+  `TRAEFIK_ALIAS_RULE`, les profils (`worker` pour Symfony), les identifiants de l'application.
+- **Une commande** lancée dans ce dossier après la mise à jour du code : `make ENV=prod deploy`
+  (cible du type dans `.docker/make/<type>.mk` : reconstruction et redémarrage, plus dépendances,
+  migrations et cache pour Symfony, cache pour PrestaShop). Avant, rafraîchir les images de base
+  (`docker compose --env-file .docker/.env -f .docker/docker-compose.prod.yml pull
+  --ignore-buildable` puis `build --pull`), sinon un correctif publié en amont n'arrive jamais.
+- **Le socle démarré sur l'hôte** (réseaux `traefik`, `databases`, `mailer`, résolveur `le`,
+  middleware `security-headers@file`) et le DNS du domaine (et des alias) pointant sur l'hôte.
+
+### Environnement de développement sur le même hôte
+
+Même fichiers, second dossier, autre `.docker/.env` : seules ces lignes changent.
+
+```dotenv
+COMPOSE_PROJECT_NAME=site-dev            # distinct de la prod : conteneurs, routeurs, image
+COMPOSE_PRODUCTION_DOMAIN=dev.example.com
+PROD_WWW_ALIAS=0                         # jamais www pour un sous-domaine
+TRAEFIK_AUTH_USERS=qa:$$2y$$05$$…        # htpasswd -nbB qa <mot de passe>, chaque $ doublé
+```
+
+`TRAEFIK_AUTH_USERS` vide (la prod) : aucun middleware d'authentification n'est attaché. La base
+du dev est une base distincte de celle de la prod (autres identifiants dans son `.env`).

@@ -10,7 +10,8 @@ export
 COMPOSE_FILES := -f .docker/docker-compose.yml
 ifeq ($(ENV),prod)
   COMPOSE_FILES := -f .docker/docker-compose.prod.yml
-  ifeq ($(PROD_WWW_ALIAS),1)
+  # Alias redirigés : www.<domaine> (PROD_WWW_ALIAS=1) ou règle libre (TRAEFIK_ALIAS_RULE).
+  ifneq ($(filter 1,$(PROD_WWW_ALIAS))$(if $(TRAEFIK_ALIAS_RULE),1),)
     COMPOSE_FILES += -f .docker/docker-compose.prod.www.yml
   endif
 endif
