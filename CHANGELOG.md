@@ -6,6 +6,13 @@ requise : nouvelle variable `.env`, `make traefik-config`, cron, ou rien.
 ## Non publié
 
 ### Modifié
+- `templates/site` : `docker-compose.prod.yml` sert aussi un environnement de développement sur
+  le même hôte (second dossier, `.docker/.env` propre). Basic auth optionnelle par
+  `TRAEFIK_AUTH_USERS` (vide = aucun middleware), alias redirigés par `TRAEFIK_ALIAS_RULE` (à la
+  place de `www.` seul ; le Makefile ajoute `docker-compose.prod.www.yml` quand l'un des deux est
+  posé). Le workflow `.github/workflows/deploy.yml` (runner sur le serveur, `git reset`) est retiré :
+  le déploiement est ajouté par l'outil de l'hôte, le README décrit ce qu'il attend. Tests :
+  `tests/site-template.bats`. **Action serveur** : aucune (les sites existants ne sont pas touchés).
 - MySQL passe en **8.4 LTS** (`mysql:8.4`, testé en 8.4.13) : la 8.0 est en fin de vie. Mise à
   niveau en place au premier démarrage, **sans retour arrière en place**. Le conteneur garde son nom
   `infra_mysql_8_0` et ses chemins `datas/mysql_8_0/` (contrat des applications). `make check` refuse

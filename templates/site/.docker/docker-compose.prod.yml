@@ -1,5 +1,8 @@
-# Prod : même découpage qu'en local, certificat Let's Encrypt, redémarrage automatique.
-# Domaine racine : ajouter docker-compose.prod.www.yml (PROD_WWW_ALIAS=1, géré par le Makefile).
+# Serveur : même découpage qu'en local, certificat Let's Encrypt, redémarrage automatique.
+# Sert aussi un environnement de développement sur le même hôte : un second dossier avec son propre
+# .docker/.env (COMPOSE_PROJECT_NAME distinct, COMPOSE_PRODUCTION_DOMAIN=dev.<domaine>,
+# TRAEFIK_AUTH_USERS renseigné). Alias redirigés vers le domaine : docker-compose.prod.www.yml
+# (PROD_WWW_ALIAS=1 ou TRAEFIK_ALIAS_RULE, ajouté par le Makefile).
 services:
     php:
         profiles: [php]
@@ -37,7 +40,11 @@ services:
             - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.entrypoints=websecure"
             - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls=true"
             - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=le"
-            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.middlewares=security-headers@file"
+            # Basic auth optionnelle (environnement de développement) : TRAEFIK_AUTH_USERS vide = aucun
+            # middleware attaché. Valeur = sortie de `htpasswd -nbB <compte> <mot de passe>` (plusieurs comptes
+            # séparés par des virgules), chaque $ doublé ($$) dans .docker/.env.
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.middlewares=security-headers@file${TRAEFIK_AUTH_USERS:+,${COMPOSE_PROJECT_NAME}-auth}"
+            - "traefik.http.middlewares.${COMPOSE_PROJECT_NAME}-auth.basicauth.users=${TRAEFIK_AUTH_USERS:-}"
             - "traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=80"
         networks: [project_network, traefik]
 

@@ -1,14 +1,17 @@
-# Prod, domaine racine seulement : www.<domaine> redirige (301) vers <domaine>.
-# Ne jamais l'utiliser pour un sous-domaine : www.<sous-domaine> n'a pas de DNS, le défi ACME
-# échoue en boucle et pollue le journal Traefik.
+# Serveur : alias redirigés (301) vers COMPOSE_PRODUCTION_DOMAIN. Ajouté par le Makefile quand
+# PROD_WWW_ALIAS=1 (règle par défaut : www.<domaine>) ou TRAEFIK_ALIAS_RULE est renseignée (règle
+# Traefik libre, ex. Host(`www.example.com`) || Host(`example.org`)).
+# Jamais www pour un sous-domaine : www.<sous-domaine> n'a pas de DNS, le défi ACME échoue en boucle
+# et pollue le journal Traefik. Chaque hôte de la règle doit résoudre vers ce serveur.
 services:
     nginx:
         labels:
-            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-www.rule=Host(`www.${COMPOSE_PRODUCTION_DOMAIN}`)"
+            - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-www.rule=${TRAEFIK_ALIAS_RULE:-Host(`www.${COMPOSE_PRODUCTION_DOMAIN}`)}"
             - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-www.entrypoints=websecure"
             - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-www.tls=true"
             - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-www.tls.certresolver=le"
             - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-www.middlewares=${COMPOSE_PROJECT_NAME}-www-redirect"
-            - "traefik.http.middlewares.${COMPOSE_PROJECT_NAME}-www-redirect.redirectregex.regex=^https?://www\\.[^/]+(.*)"
+            # Le routeur ne reçoit que les hôtes de la règle : tout hôte est renvoyé vers le domaine.
+            - "traefik.http.middlewares.${COMPOSE_PROJECT_NAME}-www-redirect.redirectregex.regex=^https?://[^/]+(.*)"
             - "traefik.http.middlewares.${COMPOSE_PROJECT_NAME}-www-redirect.redirectregex.replacement=https://${COMPOSE_PRODUCTION_DOMAIN}$${1}"
             - "traefik.http.middlewares.${COMPOSE_PROJECT_NAME}-www-redirect.redirectregex.permanent=true"

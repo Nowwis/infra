@@ -83,6 +83,43 @@ nodejs_command() {
   [[ "$output" == *"redirectregex"* ]]
 }
 
+@test "prod : sans TRAEFIK_AUTH_USERS, aucun middleware d'authentification attaché" {
+  use_type wordpress
+  run bash -c "cd '$S/.docker' && docker compose -f docker-compose.prod.yml config --format json | jq -r '.services.nginx.labels[\"traefik.http.routers.site.middlewares\"]'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "security-headers@file" ]
+}
+
+@test "dev sur le serveur : domaine dev, nom distinct, basic auth attachée, hash intact" {
+  use_type wordpress
+  sed -i -e 's/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=site-dev/' \
+    -e 's/^COMPOSE_PRODUCTION_DOMAIN=.*/COMPOSE_PRODUCTION_DOMAIN=dev.site.example/' "$S/.docker/.env"
+  printf '%s\n' 'TRAEFIK_AUTH_USERS=qa:$$2y$$05$$abc/def' >> "$S/.docker/.env"
+  run bash -c "cd '$S/.docker' && docker compose -f docker-compose.prod.yml config --format json | jq -r '.services.nginx.labels | to_entries[] | \"\\(.key)=\\(.value)\"'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'traefik.http.routers.site-dev.rule=Host(`dev.site.example`)'* ]]
+  [[ "$output" == *"traefik.http.routers.site-dev.middlewares=security-headers@file,site-dev-auth"* ]]
+  # `compose config` réécrit chaque $ du résultat en $$ : $$ ici = un $ simple dans le label réel.
+  # Un $ non doublé dans .env aurait été lu comme une variable et le hash tronqué.
+  [[ "$output" == *'traefik.http.middlewares.site-dev-auth.basicauth.users=qa:$$2y$$05$$abc/def'* ]]
+}
+
+@test "alias : TRAEFIK_ALIAS_RULE remplace www et redirige tout hôte de la règle vers le domaine" {
+  use_type html
+  printf '%s\n' 'TRAEFIK_ALIAS_RULE=Host(`www.site.example`) || Host(`site.example.org`)' >> "$S/.docker/.env"
+  run make -C "$S" -n up ENV=prod
+  [[ "$output" == *"docker-compose.prod.www.yml"* ]]
+  run bash -c "cd '$S/.docker' && docker compose -f docker-compose.prod.yml -f docker-compose.prod.www.yml config"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'rule: Host(`www.site.example`) || Host(`site.example.org`)'* ]]
+  [[ "$output" == *'replacement: https://site.example$${1}'* ]]
+}
+
+@test "le modèle ne porte aucun déploiement (ajouté par l'outil de l'hôte)" {
+  [ ! -e "$T/.github/workflows/deploy.yml" ]
+  [ ! -e "$T/deploy" ]
+}
+
 @test "prod : le worker Symfony n'existe que sous son profil" {
   use_type symfony
   [ "$(services docker-compose.prod.yml)" = "nginx php" ]
