@@ -1,0 +1,31 @@
+# Refus des chemins cachés, pour TOUS les hôtes servis par ce Traefik : tout chemin dont le
+# premier segment commence par un point (/.git/, /.env, /.docker/…) reçoit un 403, sauf
+# /.well-known/ (ACME, security.txt, assetlinks…). Un dépôt monté comme racine web ne fuit
+# ainsi ni son historique ni ses secrets, même si le serveur web de l'application les sert.
+#
+# Le routeur ne porte pas de Host : il s'applique à toutes les applications, sans opt-in, et sa
+# priorité passe devant leurs routeurs (Traefik trie par longueur de règle par défaut, quelques
+# dizaines au plus). Il ne touche que `websecure` : `web` redirige déjà tout vers HTTPS au niveau
+# de l'entrypoint, et le défi ACME HTTP-01 y est servi par Traefik lui-même.
+#
+# `tls: {}` sans resolver : aucun certificat n'est demandé pour ce routeur, le certificat de
+# l'hôte demandé (ACME en prod, mkcert en local) est choisi par SNI comme pour toute requête.
+#
+# Défense en profondeur : chaque application refuse aussi ces chemins dans sa propre config
+# nginx/apache (CONTRACT.md) ; cette règle ne remplace pas une racine web limitée à public/.
+http:
+  routers:
+    deny-dotfiles:
+      rule: 'PathRegexp(`^/\.`) && !PathPrefix(`/.well-known/`)'
+      priority: 100000
+      entrypoints: [websecure]
+      middlewares: [deny-all]
+      service: noop@internal
+      tls: {}
+
+  middlewares:
+    # Liste blanche réduite à la boucle locale : aucune requête venue du réseau ne passe → 403.
+    deny-all:
+      ipAllowList:
+        sourceRange:
+          - 127.0.0.1/32

@@ -84,8 +84,8 @@ bin/infra-check                  la vérification pré-déploiement (make check)
 configuration/traefik2/
   config/traefik.local.yaml      config statique locale (dashboard ouvert, pas d'ACME)
   config/traefik.prod.yaml       config statique prod (ACME, journal d'accès JSON)
-  config/dynamic/local/          certificat mkcert, exemples de routes vers l'hôte
-  config/dynamic/prod/           middlewares partagés (en-têtes de sécurité, opt-in)
+  config/dynamic/local/          certificat mkcert, exemples de routes vers l'hôte, refus des chemins cachés
+  config/dynamic/prod/           middlewares partagés (en-têtes de sécurité, opt-in), refus des chemins cachés
   certs/                         mkcert (gitignoré)      logs/  journal d'accès (gitignoré)
   rotate-logs.sh                 rotation du journal d'accès, sans logrotate, via cron
 configuration/mysql_8_0/conf.d/  surcharges MySQL (vide par défaut)

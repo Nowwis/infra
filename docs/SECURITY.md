@@ -61,7 +61,25 @@ Passer à un an, puis `includeSubDomains`, puis `preload`, seulement après inve
 les sous-domaines (chacun doit être joignable en HTTPS seul). Pas de Content-Security-Policy au
 niveau du proxy : elle demande un nonce par requête, donc elle relève de l'application.
 
-## 5. Journal d'accès
+## 5. Chemins cachés
+
+`dynamic/<ENV>/deny-dotfiles.yaml`, **identique dans les deux ENV et appliqué à tous les hôtes sans
+opt-in** : tout chemin qui commence par un point (`/.git/`, `/.env`, `/.docker/`…) reçoit un 403 de
+Traefik, sauf `/.well-known/` (ACME, `security.txt`). Routeur sans `Host`, priorité 100000 (devant
+tout routeur d'application, dont la priorité par défaut est la longueur de sa règle), middleware
+`deny-all` (`ipAllowList` réduit à `127.0.0.1/32`), service `noop@internal`, entrypoint `websecure`
+seulement (`web` redirige déjà tout vers HTTPS ; le défi ACME HTTP-01 y reste servi par Traefik).
+
+Ce n'est qu'une première couche. Chaque application refuse aussi ces chemins dans son propre
+serveur web (`CONTRACT.md` §5) et, autant que possible, ne publie que `public/` : un fichier
+sensible à la racine du dépôt sans point en tête (`composer.json`, `Makefile`, un dump `.sql`)
+n'est pas couvert par cette règle.
+
+Pour une application qui doit vraiment servir un chemin caché autre que `/.well-known/`, la
+seule voie est un routeur de priorité supérieure dans un fichier `99-host*.yaml` de l'hôte, limité
+à son `Host` et à ce chemin précis.
+
+## 6. Journal d'accès
 
 Format JSON, champs `Referer`, `User-Agent`, `Cf-Connecting-Ip`, `X-Forwarded-For` conservés :
 le journal contient des **données personnelles** (adresses IP). Rotation toutes les 6 h,
@@ -69,14 +87,14 @@ le journal contient des **données personnelles** (adresses IP). Rotation toutes
 traitements si la réglementation l'exige. Le dossier `logs/` n'est pas versionné et appartient à
 root (écrit par le conteneur).
 
-## 6. Surface Docker
+## 7. Surface Docker
 
 Traefik monte `/var/run/docker.sock` en lecture seule : un Traefik compromis lit l'état de tous
 les conteneurs de l'hôte. C'est le prix du provider Docker ; l'alternative (proxy de socket
 filtrant) n'est pas mise en place ici. Le socle n'exécute rien en tant que root hors des
 conteneurs.
 
-## 7. Signaler
+## 8. Signaler
 
 Une faille dans la configuration du socle : ouvrir une issue privée ou écrire au mainteneur
 indiqué dans le dépôt, sans publier le détail avant correction.
