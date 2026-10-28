@@ -27,4 +27,12 @@ init-dev: ## recrée la base locale, migre, charge les fixtures
 	$(CONSOLE) doctrine:migrations:migrate -n --allow-no-migration
 	$(CONSOLE) doctrine:fixtures:load -n
 
-deploy: upbuild install migrate clean-cache ## prod : reconstruit, dépendances, migrations, cache
+# Déploiement (`make ENV=prod deploy`, lancé sur le serveur après la synchronisation du code). Si le dépôt porte le
+# post_deploy commun .docker/make/deploy.mk (copie à l'identique d'une référence partagée : composer --no-dev, migrations,
+# cache, assets, workers, test de fumée), c'est lui qui définit `deploy` ; sinon, cible minimale ci-dessous.
+ifneq ($(wildcard .docker/make/deploy.mk),)
+include .docker/make/deploy.mk
+else
+deploy: upbuild install migrate clean-cache
+endif
+deploy: ## prod : post_deploy (deploy.mk commun s'il est là, sinon reconstruit, dépendances, migrations, cache)
