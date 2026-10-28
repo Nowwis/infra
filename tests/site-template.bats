@@ -136,6 +136,20 @@ nodejs_command() {
   [[ "$output" == *"docker-compose.prod.yml"* ]]
 }
 
+@test "symfony : make deploy = cible minimale, ou le post_deploy commun .docker/make/deploy.mk s'il est présent" {
+  use_type symfony
+  run make -C "$S" -n deploy ENV=prod
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"composer install"* ]]
+  printf 'deploy: deploy-common\ndeploy-common:\n\t@echo POST-DEPLOY-COMMUN\n' > "$S/.docker/make/deploy.mk"
+  run make -C "$S" deploy ENV=prod
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"POST-DEPLOY-COMMUN"* ]]
+  [[ "$output" != *"composer install"* ]]
+  run make -C "$S" help
+  [ "$(grep -c 'deploy ' <<<"$output")" -eq 1 ]
+}
+
 @test "make prod ajoute l'alias www quand PROD_WWW_ALIAS=1" {
   use_type html
   sed -i "s/^PROD_WWW_ALIAS=.*/PROD_WWW_ALIAS=1/" "$S/.docker/.env"
