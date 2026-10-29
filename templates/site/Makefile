@@ -45,6 +45,7 @@ logs: ## journaux (make logs S=php pour un autre service que nginx)
 exec: ## shell dans le conteneur php
 	$(EXEC_PHP) bash
 
--include .docker/make/$(PROJECT_TYPE).mk
-# Cibles propres au projet (facultatif) : les fichiers communs restent identiques au modèle.
+# Réglages et cibles propres au projet (facultatif), AVANT le type : ses variables (SF_* de deploy.mk…) doivent
+# être posées quand le fichier du type est lu. Les fichiers communs restent identiques au modèle.
 -include .docker/make/project.mk
+-include .docker/make/$(PROJECT_TYPE).mk

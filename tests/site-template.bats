@@ -298,3 +298,11 @@ nodejs_command() {
   run make bonjour
   [ "$status" -eq 0 ]; [ "$output" = BONJOUR ]
 }
+
+@test "project.mk lu avant le type : une variable du projet est visible du fichier du type" {
+  d="$BATS_TEST_TMPDIR/site"; cp -r "$BATS_TEST_DIRNAME/../templates/site" "$d"; cd "$d"; cp .docker/.env.example .docker/.env
+  printf 'PROJECT_SETTING := oui\n' > .docker/make/project.mk
+  printf 'ifeq ($(PROJECT_SETTING),oui)\nvu-par-le-type: ; @echo VU\nendif\n' >> ".docker/make/$(sed -n 's/^PROJECT_TYPE=//p' .docker/.env).mk"
+  run make vu-par-le-type
+  [ "$status" -eq 0 ]; [ "$output" = VU ]
+}

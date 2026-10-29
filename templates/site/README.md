@@ -127,7 +127,7 @@ le modèle, pas dans la copie. Ce qu'un projet ajoute vit dans des fichiers facu
 |---|---|
 | `.docker/docker-compose.project.yml` | services locaux en plus (worker Messenger, broker, outil de dev), ou complément d'un service commun |
 | `.docker/docker-compose.prod.project.yml` | idem en prod (`ENV=prod`) |
-| `.docker/make/project.mk` | cibles `make` du projet |
+| `.docker/make/project.mk` | réglages (`SF_*` de `deploy.mk`…) et cibles `make` du projet ; lu **avant** `.docker/make/<type>.mk` |
 
 Un service ajouté rejoint les mêmes réseaux que les services communs (`project_network`, et `databases` / `mailer`
 s'il en a besoin), sans base ni serveur de mail à lui.
