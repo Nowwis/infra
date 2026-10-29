@@ -15,6 +15,10 @@ ifeq ($(ENV),prod)
     COMPOSE_FILES += -f .docker/docker-compose.prod.www.yml
   endif
 endif
+# Services propres au projet (worker, broker, outil de dev…) : fichiers facultatifs du dépôt, jamais dans le
+# modèle, ajoutés après les fichiers communs (local : docker-compose.project.yml, prod : docker-compose.prod.project.yml).
+PROJECT_COMPOSE := .docker/docker-compose.$(if $(filter prod,$(ENV)),prod.)project.yml
+COMPOSE_FILES += $(if $(wildcard $(PROJECT_COMPOSE)),-f $(PROJECT_COMPOSE))
 DOCKER_COMPOSE := docker compose --env-file .docker/.env $(COMPOSE_FILES)
 EXEC_PHP := $(DOCKER_COMPOSE) exec php
 
@@ -42,3 +46,5 @@ exec: ## shell dans le conteneur php
 	$(EXEC_PHP) bash
 
 -include .docker/make/$(PROJECT_TYPE).mk
+# Cibles propres au projet (facultatif) : les fichiers communs restent identiques au modèle.
+-include .docker/make/project.mk
