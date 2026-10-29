@@ -25,9 +25,11 @@ http:
         # en <embed> ou ses aperçus en iframe de même origine.
         customFrameOptionsValue: SAMEORIGIN
         referrerPolicy: strict-origin-when-cross-origin
-        permissionsPolicy: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), midi=()"
+        # geolocation et payment en (self) : l application garde la fonction, pas une iframe tierce.
+        permissionsPolicy: "camera=(), microphone=(), geolocation=(self), payment=(self), usb=(), serial=(), midi=()"
         customResponseHeaders:
-          Cross-Origin-Opener-Policy: "same-origin"
+          # allow-popups : fenêtres de paiement et de connexion (opener conservé).
+          Cross-Origin-Opener-Policy: "same-origin-allow-popups"
 
     # Variante pour un fournisseur d'identité (SSO) qui émet déjà lui-même des en-têtes plus
     # stricts (X-Frame-Options: DENY, nosniff, Referrer-Policy: same-origin). Les réémettre
