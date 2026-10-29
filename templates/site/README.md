@@ -117,3 +117,17 @@ TRAEFIK_AUTH_USERS=qa:$$2y$$05$$…        # htpasswd -nbB qa <mot de passe>, ch
 
 `TRAEFIK_AUTH_USERS` vide (la prod) : aucun middleware d'authentification n'est attaché. La base
 du dev est une base distincte de celle de la prod (autres identifiants dans son `.env`).
+
+## Ce qui est propre au projet
+
+Les fichiers du modèle restent **identiques** dans chaque dépôt (`.docker/`, `Makefile`) : un écart se corrige dans
+le modèle, pas dans la copie. Ce qu'un projet ajoute vit dans des fichiers facultatifs, chargés s'ils existent :
+
+| Fichier | Rôle |
+|---|---|
+| `.docker/docker-compose.project.yml` | services locaux en plus (worker Messenger, broker, outil de dev), ou complément d'un service commun |
+| `.docker/docker-compose.prod.project.yml` | idem en prod (`ENV=prod`) |
+| `.docker/make/project.mk` | cibles `make` du projet |
+
+Un service ajouté rejoint les mêmes réseaux que les services communs (`project_network`, et `databases` / `mailer`
+s'il en a besoin), sans base ni serveur de mail à lui.

@@ -285,3 +285,16 @@ nodejs_command() {
   [[ "$output" == *"/.docker/x.json 403"* ]]
   [[ "$output" == *"/.well-known/x 200"* ]]
 }
+
+@test "fichiers propres au projet : docker-compose.project.yml (local) / .prod.project.yml (prod) et make/project.mk chargés s'ils existent" {
+  d="$BATS_TEST_TMPDIR/site"; cp -r "$BATS_TEST_DIRNAME/../templates/site" "$d"; cd "$d"; cp .docker/.env.example .docker/.env
+  [[ "$(make -pn 2>/dev/null | grep '^COMPOSE_FILES')" != *project* ]]
+  printf 'services: {}\n' > .docker/docker-compose.project.yml
+  [[ "$(make -pn 2>/dev/null | grep '^COMPOSE_FILES')" == *"-f .docker/docker-compose.project.yml"* ]]
+  [[ "$(make -pn ENV=prod 2>/dev/null | grep '^COMPOSE_FILES')" != *project* ]]
+  printf 'services: {}\n' > .docker/docker-compose.prod.project.yml
+  [[ "$(make -pn ENV=prod 2>/dev/null | grep '^COMPOSE_FILES')" == *"-f .docker/docker-compose.prod.project.yml"* ]]
+  printf 'bonjour: ## test\n\t@echo BONJOUR\n' > .docker/make/project.mk
+  run make bonjour
+  [ "$status" -eq 0 ]; [ "$output" = BONJOUR ]
+}
