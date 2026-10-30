@@ -7,7 +7,7 @@ serveur de mail.
 ## 1. Compose minimal
 
 Point de départ complet et testé : [`templates/site/`](../templates/site/README.md) (Symfony,
-WordPress, PrestaShop, HTML statique). L'exemple ci-dessous en est le cœur.
+WordPress, PrestaShop, PHP natif, HTML statique). L'exemple ci-dessous en est le cœur.
 
 
 ```yaml

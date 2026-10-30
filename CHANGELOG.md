@@ -6,6 +6,13 @@ requise : nouvelle variable `.env`, `make traefik-config`, cron, ou rien.
 ## Non publié
 
 ### Modifié
+- `templates/site` : points d'extension du projet (args de l'image PHP `ENABLE_WKHTMLTOPDF`,
+  `ENABLE_PCOV`, `EXTRA_APT_PACKAGES`, `EXTRA_PECL_EXTENSIONS` ; ini `95-project.ini` ; règles nginx
+  `/etc/nginx/project.d/*.conf` ; `PROJECT_OVERRIDES` dans `project.mk`), nouveau type `php`, `soap`
+  dans l'image, `display_errors = Off`, Symfony limité à `index.php` et mode maintenance
+  (`var/maintenance.flag`), fichiers d'outillage refusés à la racine web, `deploy` recrée nginx,
+  `init-dev` suit `ENV`, `.docker/docker-compose.override.yml` local non versionné. **Action
+  serveur** : aucune ; un site migré reprend les fichiers communs puis `make ENV=prod deploy`.
 - `templates/site` : `docker-compose.prod.yml` sert aussi un environnement de développement sur
   le même hôte (second dossier, `.docker/.env` propre). Basic auth optionnelle par
   `TRAEFIK_AUTH_USERS` (vide = aucun middleware), alias redirigés par `TRAEFIK_ALIAS_RULE` (à la

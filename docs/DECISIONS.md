@@ -186,6 +186,30 @@ d'hôte plus prioritaire, limité à un `Host` et un chemin). Un `/.well-known` 
 refusé (aucun usage connu). Ne couvre ni les fichiers sensibles sans point en tête ni le trafic qui
 contourne Traefik : d'où la règle applicative maintenue en parallèle.
 
+## 2026-10-30 — Modèle de site : points d'extension du projet, type `php`, défauts plus sûrs
+
+**Décision.** Les fichiers communs du modèle restent identiques dans chaque dépôt ; tout ce qui est propre
+à un projet passe par ses fichiers facultatifs (`docker-compose[.prod].project.yml`, `make/project.mk`,
+`.docker/project/`). Ils peuvent désormais : compléter l'image PHP par `build.args` (`ENABLE_WKHTMLTOPDF`,
+`ENABLE_PCOV`, `EXTRA_APT_PACKAGES`, `EXTRA_PECL_EXTENSIONS`), ajouter un ini (`95-project.ini`), ajouter
+des règles nginx (`/etc/nginx/project.d/*.conf`, inclus dans chaque bloc `server`), remplacer une cible
+`make` (`PROJECT_OVERRIDES`). Nouveau type `php` (PHP natif, racine = racine du projet). Défauts : `soap`
+dans l'image, `display_errors = Off`, `log_errors = On`, `max_input_vars = 10000` ; Symfony n'exécute que
+`index.php` et répond 503 quand `var/maintenance.flag` existe ; les types servis depuis la racine du
+projet refusent les fichiers d'outillage (`/deploy/`, `Makefile`, `composer.*`, `*.md`) ; `deploy` recrée
+nginx ; `.docker/docker-compose.override.yml` (non versionné) est chargé en local seulement.
+
+**Pourquoi.** La migration de plusieurs sites vers le modèle a montré des besoins réels (génération PDF,
+broker, imagick, envois plus gros, règles nginx héritées, cibles `make` différentes) que la seule
+alternative — modifier la copie des fichiers communs — rendait impossibles à mettre à jour. Les args de
+build sont versionnés avec le projet, comme la version PHP : `.docker/.env` n'est pas synchronisé au
+déploiement. Une config nginx changée seule n'était pas appliquée par `up --build` (générée au démarrage
+depuis un fichier monté) ; un `make test` en `ENV=test` vidait la base de dev (`init-dev` sans `--env`).
+
+**Ce que ça exclut.** Une recette du type redéfinie dans `project.mk` sans être listée dans
+`PROJECT_OVERRIDES` (make garde la dernière lue, celle du type, avec une alerte). Une règle nginx du projet
+qui contredit le refus des chemins cachés (placée après lui). Des args d'image dans `.docker/.env`.
+
 ## À trancher
 
 - ~~Licence~~ : MIT, tranché le 2026-10-07.

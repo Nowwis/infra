@@ -56,6 +56,7 @@ services:
         restart: unless-stopped
         volumes:
             - ${APP_FOLDER}:/var/www
+            - ./php/90-extra-config.ini:/usr/local/etc/php/conf.d/90-extra-config.ini
         depends_on: [php]
         networks: [project_network, databases, mailer]
 
