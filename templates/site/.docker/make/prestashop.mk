@@ -8,8 +8,10 @@ install: ## dépendances PHP
 endif
 
 ifeq ($(filter clean-cache,$(PROJECT_OVERRIDES)),)
-clean-cache: ## vide le cache de l'environnement courant
-	$(EXEC_PHP) sh -c 'rm -rf var/cache/$(if $(filter prod,$(ENV)),prod,dev)/*'
+# PrestaShop choisit var/cache/dev ou var/cache/prod selon _PS_MODE_DEV_, pas selon ENV : les deux sont vidés.
+# Les dossiers restent, avec leur .gitkeep / index.php éventuels.
+clean-cache: ## vide le cache (var/cache/dev et var/cache/prod)
+	$(EXEC_PHP) sh -c 'for d in var/cache/dev var/cache/prod; do [ -d "$$d" ] || continue; find "$$d" -mindepth 1 -maxdepth 1 ! -name .gitkeep ! -name index.php -exec rm -rf {} +; done'
 endif
 
 ifeq ($(filter deploy,$(PROJECT_OVERRIDES)),)

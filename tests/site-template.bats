@@ -615,7 +615,29 @@ ROOT_DENIED="/deploy/deploy.sh /Makefile /composer.json /composer.lock /README.m
   printf 'clean-cache:\n\t@echo PROJET\n' > "$S/.docker/make/project.mk"
   run make -C "$S" -n clean-cache
   [[ "$output" == *"overriding recipe"* ]]
-  [[ "$output" == *"rm -rf var/cache"* ]]
+  [[ "$output" == *"var/cache/dev var/cache/prod"* ]]
+}
+
+@test "prestashop : clean-cache vide var/cache/dev et var/cache/prod (PrestaShop suit _PS_MODE_DEV_, pas ENV)" {
+  use_type prestashop
+  for env in dev prod; do
+    for d in dev prod; do
+      mkdir -p "$S/var/cache/$d/smarty"; touch "$S/var/cache/$d/smarty/x.php" "$S/var/cache/$d/class_index.php" \
+        "$S/var/cache/$d/.gitkeep" "$S/var/cache/$d/index.php"
+    done
+    touch "$S/var/cache/.gitkeep"
+    run make -C "$S" --no-print-directory clean-cache ENV="$env" EXEC_PHP=
+    [ "$status" -eq 0 ] || { echo "$env : $output"; return 1; }
+    for d in dev prod; do
+      [ -d "$S/var/cache/$d" ] && [ -f "$S/var/cache/$d/.gitkeep" ] && [ -f "$S/var/cache/$d/index.php" ]
+      [ ! -e "$S/var/cache/$d/smarty" ] && [ ! -e "$S/var/cache/$d/class_index.php" ] || { echo "$env : var/cache/$d non vidé"; return 1; }
+    done
+    [ -f "$S/var/cache/.gitkeep" ]
+  done
+  # Dossiers absents : pas d'échec.
+  rm -r "$S/var"
+  run make -C "$S" --no-print-directory clean-cache EXEC_PHP=
+  [ "$status" -eq 0 ]
 }
 
 @test "symfony : init-dev passe --env à chaque commande console (ENV=test ne touche pas la base dev)" {
