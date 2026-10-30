@@ -27,6 +27,53 @@ services() {
 
 config() { (cd "$S/.docker" && docker compose -f "$1" config); }
 
+NGINX_IMAGE=site-template-nginx-test
+
+# need_docker : ignore le test proprement si Docker n'est pas joignable
+need_docker() { docker info >/dev/null 2>&1 || skip "Docker absent"; }
+
+# nginx_image : image nginx du modèle (Dockerfile, point d'extension project.d), construite une fois
+nginx_image() {
+  need_docker
+  docker image inspect "$NGINX_IMAGE" >/dev/null 2>&1 && [ "${NGINX_IMAGE_BUILT:-}" = 1 ] && return
+  docker build -q -t "$NGINX_IMAGE" "$T/.docker/nginx" >/dev/null
+  export NGINX_IMAGE_BUILT=1
+}
+
+# stack <type> <dossier du site> [dossier project.d] : nginx du modèle + php-fpm dans le même espace réseau
+# (« php » = 127.0.0.1, aucun réseau Docker créé). Sans php (STACK_NO_PHP=1), une requête PHP répond 502.
+stack() {
+  nginx_image
+  STACK="site-tpl-$BATS_TEST_NUMBER-$$"
+  chmod -R a+rwX "$2"
+  local net=()
+  if [ -z "${STACK_NO_PHP:-}" ]; then
+    docker run -d --rm --name "$STACK-php" --add-host php:127.0.0.1 -v "$2:/var/www" php:8.4-fpm >/dev/null
+    net=(--network "container:$STACK-php")
+  else
+    net=(--add-host php:127.0.0.1)
+  fi
+  docker run -d --rm --name "$STACK-nginx" "${net[@]}" \
+    -v "$2:/var/www:ro" -v "$T/.docker/nginx/$1.conf:/etc/templates/nginx.conf:ro" \
+    ${3:+-v "$3:/etc/nginx/project.d:ro"} "$NGINX_IMAGE" >/dev/null
+  for _ in $(seq 50); do docker exec "$STACK-nginx" curl -s -o /dev/null http://127.0.0.1/ 2>/dev/null && return; sleep 0.1; done
+  docker logs "$STACK-nginx"; return 1
+}
+
+# get <chemin>… : « chemin statut corps(40 premiers octets) » par ligne, depuis le conteneur nginx
+get() {
+  local p
+  for p in "$@"; do
+    docker exec "$STACK-nginx" sh -c "c=\$(curl -s -o /tmp/b -w '%{http_code}' 'http://127.0.0.1$p'); printf '%s %s %s\n' '$p' \"\$c\" \"\$(head -c 40 /tmp/b | tr -d '\r\n')\""
+  done
+}
+
+teardown() {
+  if [ -n "${STACK:-}" ]; then
+    docker rm -f "$STACK-nginx" "$STACK-php" >/dev/null 2>&1 || true
+  fi
+}
+
 # nodejs_command : commande du service nodejs (local) sur une ligne, sans repli YAML
 nodejs_command() {
   (cd "$S/.docker" && docker compose -f docker-compose.yml config --format json) | jq -r '.services.nodejs.command | join(" ")'
@@ -37,10 +84,11 @@ nodejs_command() {
   use_type wordpress;  [ "$(services docker-compose.yml)" = "nginx php" ]
   use_type prestashop; [ "$(services docker-compose.yml)" = "nginx php" ]
   use_type symfony;    [ "$(services docker-compose.yml)" = "nginx nodejs php" ]
+  use_type php;        [ "$(services docker-compose.yml)" = "nginx php" ]
 }
 
 @test "chaque type a sa config nginx et sa cible make" {
-  for t in html symfony wordpress prestashop; do
+  for t in html symfony wordpress prestashop php; do
     [ -f "$T/.docker/nginx/$t.conf" ]
     [ -f "$T/.docker/make/$t.mk" ]
   done
@@ -161,7 +209,7 @@ nodejs_command() {
 }
 
 @test "chaque config nginx passe nginx -t" {
-  for t in html symfony wordpress prestashop; do
+  for t in html symfony wordpress prestashop php; do
     run docker run --rm --add-host php:127.0.0.1 -v "$T/.docker/nginx/$t.conf:/etc/nginx/nginx.conf:ro" \
       nginx:alpine nginx -t
     [ "$status" -eq 0 ] || { echo "$t : $output"; return 1; }
@@ -265,7 +313,7 @@ nodejs_command() {
 }
 
 @test "chaque config nginx refuse les chemins cachés sauf /.well-known/, en premier bloc regex" {
-  for t in html symfony wordpress prestashop; do
+  for t in html symfony wordpress prestashop php; do
     first="$(grep -m1 -E '^\s+location ~' "$T/.docker/nginx/$t.conf")"
     [[ "$first" == *'location ~ /\.(?!well-known/) {'* ]] || { echo "$t : $first"; return 1; }
   done
@@ -305,4 +353,288 @@ nodejs_command() {
   printf 'ifeq ($(PROJECT_SETTING),oui)\nvu-par-le-type: ; @echo VU\nendif\n' >> ".docker/make/$(sed -n 's/^PROJECT_TYPE=//p' .docker/.env).mk"
   run make vu-par-le-type
   [ "$status" -eq 0 ]; [ "$output" = VU ]
+}
+
+@test "php : type PHP natif, profil php, racine = racine du projet" {
+  grep -q '^# symfony | wordpress | prestashop | php | html$' "$T/.docker/.env.example"
+  grep -q 'root /var/www;' "$T/.docker/nginx/php.conf"
+  grep -q 'try_files $uri $uri/ /index.php$is_args$args;' "$T/.docker/nginx/php.conf"
+  grep -q 'map $http_x_forwarded_proto $fastcgi_https' "$T/.docker/nginx/php.conf"
+  grep -q '| `php` | nginx, php (`php`) | racine du projet |' "$T/README.md"
+}
+
+@test "image PHP : soap commun, compléments par args désactivés par défaut" {
+  f="$T/.docker/php/Dockerfile"
+  grep -Eq 'docker-php-ext-install .* soap' "$f"
+  grep -q 'libxml2-dev' "$f"
+  grep -qx 'ARG ENABLE_WKHTMLTOPDF=0' "$f"
+  grep -qx 'ARG ENABLE_PCOV=0' "$f"
+  grep -qx 'ARG EXTRA_APT_PACKAGES=""' "$f"
+  grep -qx 'ARG EXTRA_PECL_EXTENSIONS=""' "$f"
+  grep -q 'wkhtmltox_0.12.6.1-3.bookworm_amd64.deb' "$f"
+  # Jamais dans .docker/.env (non synchronisé au déploiement), comme la version PHP.
+  run grep -E 'ENABLE_WKHTMLTOPDF|ENABLE_PCOV|EXTRA_APT|EXTRA_PECL' "$T/.docker/.env.example" "$T/.docker/docker-compose.yml" "$T/.docker/docker-compose.prod.yml"
+  [ "$status" -eq 1 ]
+}
+
+@test "image PHP : les args d'un project.yml se fusionnent avec ceux du fichier commun (local et prod)" {
+  use_type symfony
+  for f in docker-compose.project.yml docker-compose.prod.project.yml; do
+    printf 'services:\n    php:\n        build:\n            args:\n                ENABLE_WKHTMLTOPDF: 1\n                EXTRA_PECL_EXTENSIONS: amqp imagick\n' > "$S/.docker/$f"
+  done
+  run bash -c "cd '$S/.docker' && docker compose -f docker-compose.yml -f docker-compose.project.yml config --format json | jq -c '.services.php.build.args'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ENABLE_WKHTMLTOPDF":"1"'* ]]
+  [[ "$output" == *'"EXTRA_PECL_EXTENSIONS":"amqp imagick"'* ]]
+  [[ "$output" == *'"COMPOSER_VERSION":"2"'* ]]
+  [[ "$output" == *'"UID":"1000"'* ]]
+  run bash -c "cd '$S/.docker' && docker compose -f docker-compose.prod.yml -f docker-compose.prod.project.yml config --format json | jq -c '.services.php.build.args'"
+  [[ "$output" == *'"ENABLE_WKHTMLTOPDF":"1"'* ]]
+  [[ "$output" == *'"ENABLE_XDEBUG":"0"'* ]]
+}
+
+@test "image PHP : build réel avec wkhtmltopdf, pcov, amqp, imagick (SITE_TEMPLATE_BUILD=1, lent)" {
+  [ "${SITE_TEMPLATE_BUILD:-}" = 1 ] || skip "SITE_TEMPLATE_BUILD=1 pour construire l'image complète"
+  need_docker
+  docker build -q -t site-template-php-test --build-arg ENABLE_WKHTMLTOPDF=1 --build-arg ENABLE_PCOV=1 \
+    --build-arg EXTRA_APT_PACKAGES="librabbitmq-dev libmagickwand-dev ghostscript poppler-utils" \
+    --build-arg EXTRA_PECL_EXTENSIONS="amqp imagick" "$T/.docker/php" >/dev/null
+  run docker run --rm site-template-php-test sh -c 'php -m; wkhtmltopdf --version; pdftotext -v 2>&1 | head -1;
+    echo "<h1>ok</h1>" > /tmp/a.html && wkhtmltopdf -q /tmp/a.html /tmp/a.pdf && head -c 5 /tmp/a.pdf'
+  [ "$status" -eq 0 ]
+  for m in soap amqp imagick pcov; do grep -qx "$m" <<<"$output" || { echo "$m absent"; return 1; }; done
+  [[ "$output" == *"wkhtmltopdf 0.12.6.1 (with patched qt)"* ]]
+  [[ "$output" == *"pdftotext version"* ]]
+  [[ "$output" == *"%PDF-"* ]]
+}
+
+@test "php.ini commun : erreurs au journal, jamais dans la page, max_input_vars" {
+  f="$T/.docker/php/90-extra-config.ini"
+  grep -qx 'log_errors = On' "$f"
+  grep -qx 'display_errors = Off' "$f"
+  grep -qx 'max_input_vars = 10000' "$f"
+  grep -q '95-project.ini' "$T/README.md"
+}
+
+@test "prod : le worker lit le php.ini commun comme php" {
+  use_type symfony
+  sed -i "s/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=php,worker/" "$S/.docker/.env"
+  run bash -c "cd '$S/.docker' && docker compose -f docker-compose.prod.yml config --format json | jq -r '.services.worker.volumes[].target'"
+  [[ "$output" == *"/usr/local/etc/php/conf.d/90-extra-config.ini"* ]]
+}
+
+@test "nginx : include project.d juste après le refus des chemins cachés, avant tout autre bloc regex" {
+  grep -q 'mkdir -p /etc/nginx/project.d' "$T/.docker/nginx/Dockerfile"
+  for t in html symfony wordpress prestashop php; do
+    c="$T/.docker/nginx/$t.conf"
+    run awk '/location ~ \/\\\.\(\?!well-known\/\) \{/{d=NR} /include \/etc\/nginx\/project.d\/\*\.conf;/{i=NR} /^\s+location ~/{if(!f){f=NR} else if(!s){s=NR}} END{print d, i, f, s}' "$c"
+    read -r deny inc first second <<<"$output"
+    [ "$deny" = "$first" ] || { echo "$t : premier regex $first, refus $deny"; return 1; }
+    [ -n "$inc" ] && [ "$inc" -gt "$deny" ] && [ "$inc" -lt "$second" ] || { echo "$t : include $inc ($deny..$second)"; return 1; }
+  done
+}
+
+@test "nginx : chaque config passe nginx -t dans l'image du modèle, avec et sans fichier du projet" {
+  nginx_image
+  pd="$BATS_TEST_TMPDIR/project.d"; mkdir -p "$pd"
+  printf 'client_max_body_size 100M;\nlocation ~ ^/legacy/.*\\.php$ { return 410; }\n' > "$pd/project.conf"
+  for t in html symfony wordpress prestashop php; do
+    run docker run --rm --add-host php:127.0.0.1 -v "$T/.docker/nginx/$t.conf:/etc/templates/nginx.conf:ro" \
+      "$NGINX_IMAGE" sh -c '/docker-entrypoint.d/99-change.sh && nginx -t'
+    [ "$status" -eq 0 ] || { echo "$t sans projet : $output"; return 1; }
+    run docker run --rm --add-host php:127.0.0.1 -v "$pd:/etc/nginx/project.d:ro" \
+      -v "$T/.docker/nginx/$t.conf:/etc/templates/nginx.conf:ro" "$NGINX_IMAGE" sh -c '/docker-entrypoint.d/99-change.sh && nginx -t'
+    [ "$status" -eq 0 ] || { echo "$t avec projet : $output"; return 1; }
+  done
+}
+
+@test "nginx : une directive de niveau server du projet s'applique (client_max_body_size)" {
+  for t in symfony wordpress php; do
+    w="$BATS_TEST_TMPDIR/$t"; pd="$BATS_TEST_TMPDIR/$t-pd"; mkdir -p "$w/public" "$pd"
+    touch "$w/index.php" "$w/public/index.php"
+    STACK_NO_PHP=1 stack "$t" "$w"
+    run docker exec "$STACK-nginx" sh -c 'head -c 30000000 /dev/zero > /tmp/big; curl -s -o /dev/null -w "%{http_code}" --data-binary @/tmp/big http://127.0.0.1/index.php'
+    [ "$output" = 413 ] || { echo "$t sans projet : $output"; return 1; }
+    teardown
+    echo 'client_max_body_size 100M;' > "$pd/project.conf"
+    STACK_NO_PHP=1 stack "$t" "$w" "$pd"
+    run docker exec "$STACK-nginx" sh -c 'head -c 30000000 /dev/zero > /tmp/big; curl -s -o /dev/null -w "%{http_code}" --data-binary @/tmp/big http://127.0.0.1/index.php'
+    [ "$output" = 502 ] || { echo "$t avec projet : $output"; return 1; }
+    teardown
+  done
+  STACK=
+}
+
+@test "symfony : seul index.php s'exécute, une location regex du projet passe avant le bloc PHP" {
+  w="$BATS_TEST_TMPDIR/sf"; pd="$BATS_TEST_TMPDIR/sf-pd"; mkdir -p "$w/public/uploads" "$w/var" "$pd"
+  echo '<?php echo "FRONT ".$_SERVER["REQUEST_URI"];' > "$w/public/index.php"
+  echo '<?php echo "PWNED";' > "$w/public/uploads/x.php"
+  echo '<?php echo "OTHER";' > "$w/public/other.php"
+  printf 'location ~ ^/legacy/.*\\.php$ { return 410; }\n' > "$pd/project.conf"
+  stack symfony "$w" "$pd"
+  run get / /index.php /une/route /index.php/x /uploads/x.php /other.php /legacy/a.php
+  echo "$output"
+  [[ "$output" == *"/ 200 FRONT /"* ]]
+  [[ "$output" == *"/index.php 200 FRONT /index.php"* ]]
+  [[ "$output" == *"/une/route 200 FRONT /une/route"* ]]
+  [[ "$output" == *"/index.php/x 200 FRONT"* ]]
+  [[ "$output" == *"/uploads/x.php 404"* ]]
+  [[ "$output" == *"/other.php 404"* ]]
+  [[ "$output" == *"/legacy/a.php 410"* ]]
+  [[ "$output" != *"PWNED"* && "$output" != *"OTHER"* ]]
+}
+
+@test "symfony : maintenance (var/maintenance.flag) → 503 partout, maintenance.html servie, sans boucle" {
+  w="$BATS_TEST_TMPDIR/sf"; mkdir -p "$w/public" "$w/var"
+  echo '<?php echo "FRONT";' > "$w/public/index.php"
+  echo '<h1>MAINTENANCE</h1>' > "$w/public/maintenance.html"
+  stack symfony "$w"
+  run get /
+  [[ "$output" == "/ 200 FRONT" ]]
+  touch "$w/var/maintenance.flag"
+  run get / /index.php /une/route /maintenance.html
+  echo "$output"
+  [ "$(grep -c ' 503 <h1>MAINTENANCE</h1>' <<<"$output")" -eq 4 ]
+  run docker exec "$STACK-nginx" curl -sI http://127.0.0.1/
+  [[ "$output" == *"Retry-After: 300"* ]]
+  mv "$w/public/maintenance.html" "$w/maintenance.html.off"
+  run get /
+  [[ "$output" == "/ 503 <html><head><title>503 Service"* ]]
+  mv "$w/var/maintenance.flag" "$w/maintenance.flag.off"
+  run get /
+  [[ "$output" == "/ 200 FRONT" ]]
+}
+
+# root_files <dossier> : fichiers d'outillage à la racine d'un dépôt, qui ne doivent jamais être servis
+root_files() {
+  mkdir -p "$1/deploy" "$1/.docker"
+  for f in composer.json composer.lock Makefile deploy/deploy.sh README.md CHANGELOG.md .docker/.env; do echo SECRET > "$1/$f"; done
+}
+ROOT_DENIED="/deploy/deploy.sh /Makefile /composer.json /composer.lock /README.md /CHANGELOG.md /.docker/.env"
+
+@test "wordpress : outillage et fichiers d'installation refusés, wp-admin et thèmes servis" {
+  w="$BATS_TEST_TMPDIR/wp"; root_files "$w"
+  mkdir -p "$w/wp-admin/css" "$w/wp-content/themes/t" "$w/wp-content/plugins/p"
+  echo '<?php echo "WP ".$_SERVER["REQUEST_URI"];' > "$w/index.php"
+  echo '<?php echo "ADMIN";' > "$w/wp-admin/index.php"
+  echo '<?php echo "LOGIN";' > "$w/wp-login.php"
+  echo 'a{}' > "$w/wp-admin/css/x.css"; echo 'b{}' > "$w/wp-content/themes/t/style.css"
+  echo 'doc' > "$w/wp-content/plugins/p/readme.md"
+  for f in readme.html license.txt wp-config-sample.php; do echo SECRET > "$w/$f"; done
+  stack wordpress "$w"
+  run get / /un-article/ /wp-admin/ /wp-login.php /wp-admin/css/x.css /wp-content/themes/t/style.css \
+    /wp-content/plugins/p/readme.md $ROOT_DENIED /readme.html /license.txt /wp-config-sample.php
+  echo "$output"
+  [[ "$output" == *"/ 200 WP /"* ]]
+  [[ "$output" == *"/un-article/ 200 WP /un-article/"* ]]
+  [[ "$output" == *"/wp-admin/ 200 ADMIN"* ]]
+  [[ "$output" == *"/wp-login.php 200 LOGIN"* ]]
+  [[ "$output" == *"/wp-admin/css/x.css 200 a{}"* ]]
+  [[ "$output" == *"/wp-content/themes/t/style.css 200 b{}"* ]]
+  [[ "$output" == *"/wp-content/plugins/p/readme.md 200 doc"* ]]
+  for p in $ROOT_DENIED /readme.html /license.txt /wp-config-sample.php; do
+    [[ "$output" == *"$p 403"* ]] || { echo "$p non refusé"; return 1; }
+  done
+  [[ "$output" != *SECRET* ]]
+}
+
+@test "prestashop : outillage à la racine refusé, front et thème servis" {
+  w="$BATS_TEST_TMPDIR/ps"; root_files "$w"; mkdir -p "$w/themes/t"
+  echo '<?php echo "PS ".$_SERVER["REQUEST_URI"];' > "$w/index.php"
+  echo 't{}' > "$w/themes/t/a.css"; echo SECRET > "$w/Makefile.prestashop"
+  stack prestashop "$w"
+  run get / /fr/un-produit /themes/t/a.css $ROOT_DENIED /Makefile.prestashop
+  echo "$output"
+  [[ "$output" == *"/ 200 PS /"* ]]
+  [[ "$output" == *"/fr/un-produit 200 PS /fr/un-produit"* ]]
+  [[ "$output" == *"/themes/t/a.css 200 t{}"* ]]
+  for p in $ROOT_DENIED /Makefile.prestashop; do
+    [[ "$output" == *"$p 403"* ]] || { echo "$p non refusé"; return 1; }
+  done
+}
+
+@test "php : scripts et routes servis, outillage, vendor/ et .php envoyés refusés, HTTPS transmis" {
+  w="$BATS_TEST_TMPDIR/php"; root_files "$w"; mkdir -p "$w/vendor" "$w/uploads" "$w/css"
+  echo '<?php echo "APP ".$_SERVER["REQUEST_URI"];' > "$w/index.php"
+  echo '<?php echo "CONTACT";' > "$w/contact.php"
+  echo '<?php echo "HTTPS=".($_SERVER["HTTPS"] ?? "");' > "$w/https.php"
+  echo 'c{}' > "$w/css/s.css"; echo SECRET > "$w/vendor/autoload.php"; echo '<?php echo "PWNED";' > "$w/uploads/x.php"
+  stack php "$w"
+  run get / /une/route /contact.php /css/s.css /absent.php /vendor/autoload.php /uploads/x.php $ROOT_DENIED
+  echo "$output"
+  [[ "$output" == *"/ 200 APP /"* ]]
+  [[ "$output" == *"/une/route 200 APP /une/route"* ]]
+  [[ "$output" == *"/contact.php 200 CONTACT"* ]]
+  [[ "$output" == *"/css/s.css 200 c{}"* ]]
+  [[ "$output" == *"/absent.php 404"* ]]
+  for p in /vendor/autoload.php /uploads/x.php $ROOT_DENIED; do
+    [[ "$output" == *"$p 403"* ]] || { echo "$p non refusé"; return 1; }
+  done
+  run docker exec "$STACK-nginx" curl -s -H 'X-Forwarded-Proto: https' http://127.0.0.1/https.php
+  [ "$output" = "HTTPS=on" ]
+}
+
+@test "deploy des types non Symfony : nginx recréé après up --build (config régénérée)" {
+  for t in html wordpress prestashop php; do
+    use_type "$t"
+    run make -C "$S" -n ENV=prod deploy
+    [ "$status" -eq 0 ] || { echo "$t : $output"; return 1; }
+    build="$(grep -n 'up -d --remove-orphans --build' <<<"$output" | head -1 | cut -d: -f1)"
+    recreate="$(grep -n 'up -d --force-recreate --no-deps nginx' <<<"$output" | tail -1 | cut -d: -f1)"
+    [ -n "$build" ] && [ -n "$recreate" ] && [ "$recreate" -gt "$build" ] || { echo "$t : $output"; return 1; }
+    [[ "$output" == *"-f .docker/docker-compose.prod.yml up -d --force-recreate"* ]]
+  done
+}
+
+@test "PROJECT_OVERRIDES : une cible listée et redéfinie dans project.mk remplace celle du modèle, sans alerte" {
+  use_type symfony
+  printf 'PROJECT_OVERRIDES := clean-cache init-dev up\nclean-cache: ## cache du projet\n\t@echo PROJET-CLEAN\ninit-dev:\n\t@echo PROJET-INIT\nup:\n\t@echo PROJET-UP\n' > "$S/.docker/make/project.mk"
+  run make -C "$S" --no-print-directory clean-cache init-dev up
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'PROJET-CLEAN\nPROJET-INIT\nPROJET-UP')" ]
+  # Non listée : recette du modèle.
+  run make -C "$S" -n migrate
+  [[ "$output" == *"doctrine:migrations:migrate"* ]]
+  # deploy (du modèle) appelle la cible remplacée.
+  run make -C "$S" -n ENV=prod deploy
+  [[ "$output" == *"echo PROJET-CLEAN"* ]]
+  [[ "$output" != *"cache:clear"* ]]
+  run make -C "$S" help
+  [ "$(grep -c 'clean-cache' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"cache du projet"* ]]
+  for t in wordpress prestashop html php; do
+    use_type "$t"
+    printf 'PROJECT_OVERRIDES := deploy\ndeploy:\n\t@echo PROJET-DEPLOY\n' > "$S/.docker/make/project.mk"
+    run make -C "$S" --no-print-directory ENV=prod deploy
+    [ "$output" = PROJET-DEPLOY ] || { echo "$t : $output"; return 1; }
+  done
+}
+
+@test "PROJECT_OVERRIDES : une cible redéfinie sans être listée reste celle du modèle (make alerte)" {
+  use_type prestashop
+  printf 'clean-cache:\n\t@echo PROJET\n' > "$S/.docker/make/project.mk"
+  run make -C "$S" -n clean-cache
+  [[ "$output" == *"overriding recipe"* ]]
+  [[ "$output" == *"rm -rf var/cache"* ]]
+}
+
+@test "symfony : init-dev passe --env à chaque commande console (ENV=test ne touche pas la base dev)" {
+  use_type symfony
+  run make -C "$S" -n init-dev ENV=test
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'bin/console' <<<"$output")" -eq 4 ]
+  [ "$(grep -c 'bin/console .*--env=test' <<<"$output")" -eq 4 ]
+}
+
+@test "docker-compose.override.yml : chargé en local seulement, ignoré par git" {
+  use_type html
+  run make -C "$S" -pn
+  [[ "$(grep '^COMPOSE_FILES' <<<"$output")" != *override* ]]
+  printf 'services: {}\n' > "$S/.docker/docker-compose.override.yml"
+  printf 'services: {}\n' > "$S/.docker/docker-compose.project.yml"
+  run make -C "$S" -n up
+  [[ "$output" == *"-f .docker/docker-compose.project.yml -f .docker/docker-compose.override.yml up"* ]]
+  run make -C "$S" -n up ENV=prod
+  [[ "$output" != *override* ]]
+  grep -qx '/.docker/docker-compose.override.yml' "$T/.gitignore"
 }

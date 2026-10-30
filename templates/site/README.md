@@ -4,7 +4,7 @@ Point de départ d'un site branché sur le socle (voir `docs/CONTRACT.md`) : le 
 que ses services applicatifs (nginx, php, nodejs) et rejoint les réseaux `traefik`,
 `databases` et `mailer`. Pas de base, de proxy ni de serveur de mail à lui.
 
-Un seul jeu de fichiers pour quatre types, choisis par `PROJECT_TYPE` dans `.docker/.env` :
+Un seul jeu de fichiers pour cinq types, choisis par `PROJECT_TYPE` dans `.docker/.env` :
 
 | Type | Services (`COMPOSE_PROFILES`) | Racine web | Config nginx |
 |---|---|---|---|
@@ -12,6 +12,13 @@ Un seul jeu de fichiers pour quatre types, choisis par `PROJECT_TYPE` dans `.doc
 | `symfony` | nginx, php, nodejs (`php,assets`) | `public/` | `.docker/nginx/symfony.conf` |
 | `wordpress` | nginx, php (`php`) | racine du projet | `.docker/nginx/wordpress.conf` |
 | `prestashop` | nginx, php (`php`) | racine du projet | `.docker/nginx/prestashop.conf` |
+| `php` | nginx, php (`php`) | racine du projet | `.docker/nginx/php.conf` |
+
+`php` : PHP natif sans framework (tout `.php` existant s'exécute, le reste retombe sur `index.php`).
+Les types servis depuis la racine du projet (`wordpress`, `prestashop`, `php`) refusent `/deploy/`,
+`/Makefile`, `/composer.json`, `/composer.lock`, les `*.md` à la racine et les chemins cachés
+(`/.docker/`, `/.git/`…) ; WordPress aussi `readme.html`, `license.txt`, `wp-config-sample.php`,
+`php` aussi `/vendor/`.
 
 PrestaShop : version 9 uniquement (testé avec 9.2). Son archive contient un `Makefile` de
 développement qui écrase celui du modèle : le renommer (`Makefile.prestashop`) avant de
@@ -35,7 +42,10 @@ Le site répond sur `https://<COMPOSE_PROJECT_NAME>.docker.test` (certificat mkc
 
 - **PHP** : une seule image, version **figée dans `.docker/php/Dockerfile`** (`FROM php:8.4-fpm`),
   jamais dans `.docker/.env` (voir `docs/DECISIONS.md`, 2026-10-21). Changer de version = une PR.
-  Extensions communes aux trois frameworks. Xdebug par `ENABLE_XDEBUG=1` puis `make upbuild`.
+  Extensions communes aux trois frameworks (dont `soap`). Xdebug par `ENABLE_XDEBUG=1` puis `make upbuild`.
+  Compléments facultatifs (wkhtmltopdf, pcov, paquets et extensions PECL) : voir « Ce qui est propre au projet ».
+- **PHP ini** : `.docker/php/90-extra-config.ini` (php et worker) ; erreurs dans le journal
+  (`log_errors = On`), jamais dans la page (`display_errors = Off`), `max_input_vars = 10000`.
 - **HTTPS vu par PHP** : Traefik termine le TLS ; nginx transmet `HTTPS=on` à PHP d'après
   `X-Forwarded-Proto`. Sans cela, WordPress et PrestaShop redirigent vers `http://`.
 - **Assets Symfony** : le conteneur nodejs installe les dépendances puis reste inactif. Pas de
@@ -48,6 +58,15 @@ Le site répond sur `https://<COMPOSE_PROJECT_NAME>.docker.test` (certificat mkc
   liste d'hôtes libre (autres domaines redirigés), `TRAEFIK_AUTH_USERS` ajoute une basic auth
   (environnement de développement, voir « Déploiement »).
 - **Worker Messenger** (Symfony, prod) : `COMPOSE_PROFILES=php,worker`.
+- **Symfony, seul le contrôleur frontal s'exécute** : `/index.php` passe à PHP, tout autre `.php` répond
+  404 (un `.php` déposé dans `public/uploads` n'est jamais exécuté).
+- **Symfony, maintenance** : si `var/maintenance.flag` existe, nginx répond 503 à toute requête, avec
+  `public/maintenance.html` s'il existe (page autonome : CSS et images en ligne, les autres fichiers
+  répondent 503 aussi), sinon la page 503 de nginx. Le flag est posé et retiré par le projet (cibles
+  `maintenance-on` / `maintenance-off` de son `project.mk`, voir plus bas) ; nginx le lit à chaque requête,
+  sans redémarrage.
+- **`make ENV=test init-dev`** recrée la base de test (chaque commande console reçoit `--env=$(ENV)`) ;
+  sans `ENV`, la base de dev.
 
 ## WordPress
 
@@ -125,9 +144,115 @@ le modèle, pas dans la copie. Ce qu'un projet ajoute vit dans des fichiers facu
 
 | Fichier | Rôle |
 |---|---|
-| `.docker/docker-compose.project.yml` | services locaux en plus (worker Messenger, broker, outil de dev), ou complément d'un service commun |
-| `.docker/docker-compose.prod.project.yml` | idem en prod (`ENV=prod`) |
-| `.docker/make/project.mk` | réglages (`SF_*` de `deploy.mk`…) et cibles `make` du projet ; lu **avant** `.docker/make/<type>.mk` |
+| `.docker/docker-compose.project.yml` | services locaux en plus (worker Messenger, broker, outil de dev), ou complément d'un service commun (args de l'image PHP, ini, règles nginx) |
+| `.docker/docker-compose.prod.project.yml` | idem en prod (`ENV=prod`) ; à tenir cohérent avec le fichier local |
+| `.docker/make/project.mk` | réglages (`SF_*` de `deploy.mk`…), cibles `make` du projet, remplacement d'une cible du modèle ; lu **avant** les cibles communes et `.docker/make/<type>.mk` |
+| `.docker/project/` | fichiers montés par les deux précédents (convention) : `nginx.conf`, `php.ini`… |
+| `.docker/docker-compose.override.yml` | **non versionné** (`.gitignore`), local seulement (jamais chargé en `ENV=prod`) : réglage du poste, ex. route d'exposition temporaire |
 
 Un service ajouté rejoint les mêmes réseaux que les services communs (`project_network`, et `databases` / `mailer`
-s'il en a besoin), sans base ni serveur de mail à lui.
+s'il en a besoin), sans base ni serveur de mail à lui. Compose fusionne les fichiers : un `build.args`, un volume ou
+un label du projet s'ajoute à ceux du service commun (vérifier avec `docker compose … config`).
+
+| Besoin | Où | Exemple |
+|---|---|---|
+| Image PHP : wkhtmltopdf, pcov, paquets, extensions PECL | `services.php.build.args` des deux `project.yml` (jamais `.docker/.env`, comme la version PHP) | voir ci-dessous (1) |
+| PHP ini propre au projet (envois plus gros…) | volume sur `/usr/local/etc/php/conf.d/95-project.ini`, services `php` **et** `worker` | (2) |
+| Règles nginx (location, `client_max_body_size`…, niveau `server`) | volume sur `/etc/nginx/project.d/project.conf` du service `nginx` | (3) |
+| Remplacer une cible du modèle (`clean-cache`, `init-dev`, `deploy`…) | `PROJECT_OVERRIDES` dans `project.mk` | (4) |
+| Maintenance (Symfony) | cibles du projet qui posent `var/maintenance.flag` | (5) |
+| Réglage local du poste | `.docker/docker-compose.override.yml` (non versionné) | (6) |
+
+(1) Compléments de l'image PHP, tous à `0` / vides par défaut. wkhtmltopdf : 0.12.6.1 à Qt patché,
+`/usr/local/bin/wkhtmltopdf`, amd64. Les extensions PECL sont installées puis activées (`redis-6.2.0` pour une
+version précise).
+
+```yaml
+# .docker/docker-compose.project.yml (et le même bloc dans docker-compose.prod.project.yml)
+services:
+    php:
+        build:
+            args:
+                ENABLE_WKHTMLTOPDF: 1
+                ENABLE_PCOV: 1                      # local seulement, en général
+                EXTRA_APT_PACKAGES: librabbitmq-dev libmagickwand-dev ghostscript poppler-utils
+                EXTRA_PECL_EXTENSIONS: amqp imagick
+```
+
+(2) PHP ini du projet, lu après `90-extra-config.ini`. Un fichier monté seul garde l'ancienne version après un
+`git pull` tant que le conteneur n'est pas recréé : après une modification,
+`docker compose … up -d --force-recreate --no-deps php` (et `worker`).
+
+```ini
+; .docker/project/php.ini
+upload_max_filesize = 100M
+post_max_size = 100M
+```
+
+```yaml
+services:
+    php:
+        volumes:
+            - ./project/php.ini:/usr/local/etc/php/conf.d/95-project.ini:ro
+    worker:                                         # prod, s'il existe
+        volumes:
+            - ./project/php.ini:/usr/local/etc/php/conf.d/95-project.ini:ro
+```
+
+(3) Règles nginx du projet, incluses dans le bloc `server` de chaque config de type, juste après le refus des
+chemins cachés et avant les autres blocs regex (une location regex du projet passe avant le bloc PHP).
+`client_max_body_size` est posé au niveau `http` par le modèle : le projet peut le redéfinir ici (sauf
+PrestaShop, dont la location PHP fixe sa propre limite). Un dossier peut être monté à la place du fichier
+(`./project/nginx/:/etc/nginx/project.d:ro`, fichiers `*.conf`). `make ENV=prod deploy` recrée nginx, la
+règle est appliquée au déploiement.
+
+```nginx
+# .docker/project/nginx.conf
+client_max_body_size 100M;
+location ~ ^/legacy/.*\.php$ { return 410; }
+```
+
+```yaml
+services:
+    nginx:
+        volumes:
+            - ./project/nginx.conf:/etc/nginx/project.d/project.conf:ro
+```
+
+(4) Remplacer une cible du modèle : `project.mk` est lu avant les cibles communes et le fichier du type ; chaque
+cible du modèle n'est définie que si elle n'est pas listée dans `PROJECT_OVERRIDES` (pas d'alerte « overriding
+recipe », `make help` n'affiche que celle du projet). Une cible non listée reste celle du modèle.
+
+```make
+# .docker/make/project.mk
+PROJECT_OVERRIDES := clean-cache init-dev
+
+clean-cache: ## vide le cache et le pool Redis
+	$(CONSOLE) cache:clear --env=$(ENV)
+	$(CONSOLE) cache:pool:clear cache.app --env=$(ENV)
+```
+
+`$(CONSOLE)`, `$(EXEC_NODEJS)` sont définis par le fichier du type, lu après : utilisables dans les recettes (lues
+à l'exécution), pas dans une affectation `:=` de `project.mk`. `$(DOCKER_COMPOSE)`, `$(EXEC_PHP)`,
+`$(RECREATE_NGINX)` le sont avant.
+
+(5) Maintenance Symfony :
+
+```make
+maintenance-on: ## site en maintenance (503)
+	$(EXEC_PHP) touch var/maintenance.flag
+maintenance-off: ## fin de maintenance
+	$(EXEC_PHP) rm -f var/maintenance.flag
+```
+
+(6) Local, non versionné : ajouté après les autres fichiers quand `ENV` n'est pas `prod`.
+
+```yaml
+# .docker/docker-compose.override.yml
+services:
+    nginx:
+        labels:
+            - "traefik.http.routers.site-demo.rule=Host(`demo.example.com`)"
+            - "traefik.http.routers.site-demo.entrypoints=websecure"
+            - "traefik.http.routers.site-demo.tls=true"
+```

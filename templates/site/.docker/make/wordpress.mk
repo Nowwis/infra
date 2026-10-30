@@ -9,6 +9,8 @@
 #   WP_VERSION   version du cœur pour `make core` ; vide = dernière version
 #   WP_LOCALE    langue du cœur pour `make core` ; vide = en_US
 #   WP_LOCAL_DEACTIVATE  extensions à désactiver après import (pare-feu, cache de pages…)
+# Chaque cible s'efface si .docker/make/project.mk la liste dans PROJECT_OVERRIDES (et la redéfinit).
+#
 # Le préfixe des tables est WORDPRESS_TABLE_PREFIX (.docker/.env) : celui de la base importée.
 # wp-cli doit être installé sur le serveur (`wp db export`).
 #
@@ -35,25 +37,36 @@ SEARCH_REPLACE := --all-tables-with-prefix --precise --skip-columns=guid --repor
 
 .PHONY: wp core wp-config db-create db-pull files-pull cache-purge check-remote
 
+ifeq ($(filter wp,$(PROJECT_OVERRIDES)),)
 wp: ## wp-cli (make wp A="plugin list")
 	$(EXEC_PHP) wp $(A)
+endif
 
+ifeq ($(filter core,$(PROJECT_OVERRIDES)),)
 core: ## télécharge le cœur WordPress (WP_VERSION, WP_LOCALE) sans toucher wp-content
 	$(EXEC_PHP) wp core download --skip-content --force \
 	  $(if $(WP_VERSION),--version=$(WP_VERSION)) $(if $(WP_LOCALE),--locale=$(WP_LOCALE))
+endif
 
+ifeq ($(filter wp-config,$(PROJECT_OVERRIDES)),)
 wp-config: ## installe la configuration locale (.docker/wp-config.local.php → wp-config.php)
 	cp .docker/wp-config.local.php wp-config.php
+endif
 
+ifeq ($(filter db-create,$(PROJECT_OVERRIDES)),)
 db-create: ## crée la base et le compte locaux (WORDPRESS_DB_*) sur la base du socle
 	@test -n "$(WORDPRESS_DB_NAME)" -a -n "$(WORDPRESS_DB_USER)" || { echo "WORDPRESS_DB_NAME / WORDPRESS_DB_USER vides (.docker/.env)"; exit 2; }
 	echo "CREATE DATABASE IF NOT EXISTS \`$(WORDPRESS_DB_NAME)\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; \
 	CREATE USER IF NOT EXISTS '$(WORDPRESS_DB_USER)'@'%' IDENTIFIED BY '$(WORDPRESS_DB_PASSWORD)'; \
 	GRANT ALL ON \`$(WORDPRESS_DB_NAME)\`.* TO '$(WORDPRESS_DB_USER)'@'%';" | $(MYSQL_ROOT)
+endif
 
+ifeq ($(filter check-remote,$(PROJECT_OVERRIDES)),)
 check-remote:
 	@test -n "$(REMOTE)" -a -n "$(REMOTE_PROD)" || { echo "REMOTE et REMOTE_PROD sont requis (voir .docker/make/wordpress.mk)"; exit 2; }
+endif
 
+ifeq ($(filter db-pull,$(PROJECT_OVERRIDES)),)
 db-pull: check-remote db-create ## base du serveur → locale (flux, rien écrit sur le serveur), search-replace, purge
 	@test -n "$(PROD_URL)" || { echo "PROD_URL est requis pour le search-replace"; exit 2; }
 	$(SSH) $(REMOTE) "cd '$(REMOTE_PROD)' && wp db export - --single-transaction --quick" \
@@ -62,16 +75,24 @@ db-pull: check-remote db-create ## base du serveur → locale (flux, rien écrit
 	$(EXEC_PHP) wp search-replace '//$(PROD_HOST)' '//$(LOCAL_HOST)' $(SEARCH_REPLACE)
 	$(if $(WP_LOCAL_DEACTIVATE),$(EXEC_PHP) wp plugin deactivate $(WP_LOCAL_DEACTIVATE) --quiet || true)
 	$(MAKE) --no-print-directory cache-purge
+endif
 
+ifeq ($(filter files-pull,$(PROJECT_OVERRIDES)),)
 files-pull: check-remote ## uploads et langues du serveur → local (rsync, lecture seule côté serveur)
 	rsync -az --delete -e "$(SSH)" $(REMOTE):$(REMOTE_PROD)/wp-content/uploads/ wp-content/uploads/
 	rsync -az --delete -e "$(SSH)" $(REMOTE):$(REMOTE_PROD)/wp-content/languages/ wp-content/languages/
+endif
 
 # Après tout import de base : les caches (objet, transients, CSS générés par un constructeur de
 # pages) contiennent encore les URL et l'état du serveur.
+ifeq ($(filter cache-purge,$(PROJECT_OVERRIDES)),)
 cache-purge: ## vide les caches WordPress et ceux des constructeurs de pages actifs
 	$(EXEC_PHP) wp cache flush --quiet || true
 	$(EXEC_PHP) wp transient delete --all --quiet || true
 	$(EXEC_PHP) sh -c 'if wp plugin is-active elementor 2>/dev/null; then wp elementor flush-css; fi' || true
+endif
 
-deploy: upbuild ## prod : reconstruit et redémarre (le code est déjà à jour par git)
+ifeq ($(filter deploy,$(PROJECT_OVERRIDES)),)
+deploy: upbuild ## prod : reconstruit, redémarre, recrée nginx (config régénérée ; le code est déjà à jour par git)
+	$(RECREATE_NGINX)
+endif
