@@ -6,6 +6,11 @@ requise : nouvelle variable `.env`, `make traefik-config`, cron, ou rien.
 ## Non publié
 
 ### Modifié
+- `templates/site` (type `prestashop`) : `clean-cache` vide `var/cache/dev` **et** `var/cache/prod`
+  (PrestaShop choisit son dossier de cache selon `_PS_MODE_DEV_`, pas selon `ENV` : avec
+  `ENV=dev` et `_PS_MODE_DEV_` à `false`, le cache servi n'était pas vidé). Les dossiers et leurs
+  `.gitkeep` / `index.php` restent. Tests : `tests/site-template.bats`. **Action serveur** : aucune ;
+  un site qui surchargeait `clean-cache` pour cette raison peut retirer sa surcharge.
 - `templates/site` : points d'extension du projet (args de l'image PHP `ENABLE_WKHTMLTOPDF`,
   `ENABLE_PCOV`, `EXTRA_APT_PACKAGES`, `EXTRA_PECL_EXTENSIONS` ; ini `95-project.ini` ; règles nginx
   `/etc/nginx/project.d/*.conf` ; `PROJECT_OVERRIDES` dans `project.mk`), nouveau type `php`, `soap`
