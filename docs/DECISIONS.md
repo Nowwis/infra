@@ -117,6 +117,15 @@ retirée. Test sur un hôte local : mêmes codes HTTP qu'en 2.11.60 sur tous les
 
 **Ce que ça exclut.** Toute nouvelle règle `Host(`a`, `b`)` : écrire `Host(`a`) || Host(`b`)`.
 
+## 2026-11-25 — Traefik v3.8
+
+**Décision.** Image `traefik:v3.8`, même configuration qu'en 3.7.
+
+**Pourquoi.** Fin de vie de la 3.7 le 2026-11-23 ; trois avis de sécurité sur la 3.7.19 (un high). Guide de
+migration lu : changements cassants limités aux fournisseurs Kubernetes, à `peerCertURI` (non utilisé), aux mots
+de passe `basicAuth` de plus de 1024 octets et à la résolution des segments `..;x`. Test sur un hôte local :
+mêmes codes HTTP qu'en 3.7.19 sur les 39 routeurs.
+
 ## 2026-10-23 — Surveillance externe : Gatus en profil, config fournie par l'hôte
 
 **Décision.** Gatus (`twinproduction/gatus:v5.37.0`), service `gatus` sous le profil `gatus`. La config
