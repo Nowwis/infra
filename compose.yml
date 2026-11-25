@@ -7,8 +7,8 @@
 
 services:
   reverse-proxy:
-    # v3.7 : branche supportée (la 2.11 n'a plus de correctifs depuis le 2026-09-07).
-    image: traefik:v3.7
+    # v3.8 : branche supportée (la 3.7 n'a plus de correctifs depuis le 2026-11-23, la 2.11 depuis le 2026-09-07).
+    image: traefik:v3.8
     container_name: infra_traefik
     restart: always
     environment:

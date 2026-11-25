@@ -5,6 +5,14 @@ requise : nouvelle variable `.env`, `make traefik-config`, cron, ou rien.
 
 ## Non publié
 
+### Sécurité
+- Traefik passe en **v3.8** (`traefik:v3.8`) : la 3.7 n'a plus de correctifs depuis le 2026-11-23, et la
+  3.7.19 est touchée par GHSA-3rh5-223h-cpwr (high, épuisement mémoire du middleware Compress sans
+  authentification), GHSA-42x2-976f-ph52 et GHSA-9657-c2gv-wjpj (medium). Changements cassants de la 3.8 sans
+  effet ici (fournisseurs Kubernetes, `peerCertURI` non utilisé) ; `basicAuth` refuse désormais les mots de passe
+  de plus de 1024 octets. **Action serveur** : `git pull`, puis `docker compose pull reverse-proxy &&
+  docker compose up -d --no-deps reverse-proxy`.
+
 ### Modifié
 - `templates/site` (type `prestashop`) : `clean-cache` vide `var/cache/dev` **et** `var/cache/prod`
   (PrestaShop choisit son dossier de cache selon `_PS_MODE_DEV_`, pas selon `ENV` : avec
