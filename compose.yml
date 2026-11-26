@@ -67,7 +67,7 @@ services:
   # moteur compte (Doctrine, collations, JSON). Démarré seulement avec `--profile mariadb`
   # (make up PROFILES=mariadb) : il n'a pas vocation à exister sur tous les hôtes.
   mariadb:
-    image: mariadb:11.3.2
+    image: mariadb:11.8.10
     container_name: infra_mariadb_11_3
     restart: always
     profiles: [mariadb]
